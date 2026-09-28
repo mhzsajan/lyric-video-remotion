@@ -61,7 +61,7 @@ export function cueStyle(style, p, q, j) {
   return s;
 }
 
-export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, position }) => {
+export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, position, background }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = frame / fps;
@@ -80,8 +80,10 @@ export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, posit
   }[position || "center"];
 
   const frameStyle = {
-    // No background anywhere: this composition is an alpha overlay.
-    backgroundColor: "transparent",
+    // "transparent" = alpha overlay (mov / ProRes 4444). A colour like
+    // "#000000" = keyable plate for containers without alpha (mp4): the
+    // consumer sets the layer blend to Add/Screen so black disappears.
+    backgroundColor: background || "transparent",
     alignItems: "center",
     padding: "0 8vw",
     ...align,

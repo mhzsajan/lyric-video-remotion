@@ -68,6 +68,9 @@ export const RemotionRoot = () => {
         // without needing a background plate.
         shadow: "0 3px 18px rgba(0,0,0,0.55), 0 0 60px rgba(0,0,0,0.35)",
         position: "center",
+        // "transparent" renders an alpha overlay (mov); render.mjs passes
+        // "#000000" for mp4 so the plate is keyable with Add/Screen blend.
+        background: "transparent",
       }}
     />
   );

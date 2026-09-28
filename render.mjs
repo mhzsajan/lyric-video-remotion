@@ -6,7 +6,7 @@
  *   node render.mjs <audio> <lyrics.lrc> [options]
  *
  * Options
- *   --out <file>        output path (default: out/<song>.mov)
+ *   --out <file>        output path (default: out/<song>.mp4)
  *   --preview           fast, small, no alpha -- for checking timing only
  *   --no-audio          text-only overlay: no audio track in the output
  *   --font <family>     font family to render with (must be installed)
@@ -57,6 +57,16 @@ const positional = argv.filter((a, i) => {
 const PREVIEW = has("--preview");
 const NO_AUDIO = has("--no-audio");
 const REPORT_ONLY = has("--report-only");
+
+// mp4 (default): H.264, white text on BLACK background -- no alpha possible
+//   in mp4, so the consumer keys it with Add/Screen blend (Videosync2: set
+//   the layer blend to Add). Tiny files, plays everywhere.
+// mov: ProRes 4444 true alpha for layer hosts that read the alpha channel.
+const FORMAT = (flag("--format") || "mp4").toLowerCase();
+if (!["mp4", "mov"].includes(FORMAT)) {
+  console.error('  Unknown --format "' + FORMAT + '". Use mp4 or mov.');
+  process.exit(1);
+}
 const BATCH = flag("--batch");
 
 const pad = (s, n) => String(s).padEnd(n);
@@ -156,7 +166,8 @@ async function run(audioPath, lrcPath) {
 
   const outDir = path.join(HERE, "out");
   fs.mkdirSync(outDir, { recursive: true });
-  const outPath = flag("--out") || path.join(outDir, title + ".mov");
+  const defaultExt = PREVIEW ? ".mp4" : FORMAT === "mov" ? ".mov" : ".mp4";
+  const outPath = flag("--out") || path.join(outDir, title + defaultExt);
 
   // Style travels as composition PROPS, not environment variables. Remotion
   // statically replaces process.env.X at build time, and an unset variable
@@ -172,12 +183,21 @@ async function run(audioPath, lrcPath) {
   const seed = flag("--seed") || parsed.title || title;
   props.seed = seed;
   if (flag("--shadow")) props.shadow = flag("--shadow");
+  // mp4 has no alpha: paint the background black so Add/Screen blend keying
+  // is exact. mov keeps a transparent background.
+  props.background = FORMAT === "mov" ? "transparent" : "#000000";
+
+  // Format-specific codec flags. ProRes 4444 carries a real alpha channel;
+  // H.264 cannot, so the mp4 is white-on-black for blend-mode keying.
+  const formatFlags = PREVIEW
+    ? ["--scale=0.25", "--fps=15", "--codec=h264", "--crf=30"]
+    : FORMAT === "mov"
+      ? ["--codec=prores", "--prores-profile=4444", "--pixel-format=yuva444p10le"]
+      : ["--codec=h264", "--crf=17", "--pixel-format=yuv420p"];
 
   const cliArgs = [
     "render", "src/index.js", "LyricOverlay", outPath,
-    ...(PREVIEW
-      ? ["--scale=0.25", "--fps=15", "--codec=h264", "--crf=30"]
-      : ["--codec=prores", "--prores-profile=4444", "--pixel-format=yuva444p10le"]),
+    ...formatFlags,
     ...(NO_AUDIO ? ["--muted"] : []),
     // Preview only needs to reach the last sung line: without this it renders
     // the full composition -- at 15 fps that stretches 25k frames into a
@@ -191,7 +211,7 @@ async function run(audioPath, lrcPath) {
   console.log("  seed : " + seed);
   console.log(
     "  mode : " +
-    (PREVIEW ? "PREVIEW (no alpha, fast)" : "FINAL (ProRes 4444, alpha)") +
+    (PREVIEW ? "PREVIEW (fast)" : FORMAT === "mov" ? "FINAL (ProRes 4444, alpha)" : "FINAL (H.264 mp4, black bg -- blend Add/Screen)") +
     (NO_AUDIO ? " | text-only, no audio track" : "") +
     "\n"
   );
@@ -217,7 +237,11 @@ async function run(audioPath, lrcPath) {
   const size = fs.existsSync(outPath) ? fs.statSync(outPath).size : 0;
   console.log("\n  OK  " + outPath + "  (" + (size / 1024 / 1024).toFixed(1) + " MB)");
   if (!PREVIEW) {
-    console.log("      Drop onto a Videosync2 video layer, camera underneath.");
+    console.log(
+      FORMAT === "mov"
+        ? "      Drop onto a Videosync2 video layer, camera underneath."
+        : "      Videosync2: set the layer blend to Add or Screen -- black disappears."
+    );
   }
 }
 
@@ -249,6 +273,7 @@ if (BATCH) {
       "    --preview        fast, small, no alpha -- check timing first",
       "    --no-audio       leave the audio track out of the output",
       "    --font <family>  font family to render with",
+      "    --format <fmt>   mp4 (h264 black bg, default) | mov (prores alpha)",
       "    --report-only    just print the cue list",
       "    --style <name>   pin one animation: " + STYLES.join(", "),
       "    --position <pos> top | center | bottom",
