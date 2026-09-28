@@ -5,3 +5,4 @@ src/lyrics.generated.js
 demo/
 *.log
 .DS_Store
+__pycache__/

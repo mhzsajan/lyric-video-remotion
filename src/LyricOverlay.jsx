@@ -1,11 +1,42 @@
 import React from "react";
-import { AbsoluteFill, Audio, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Audio, staticFile, useCurrentFrame, useVideoConfig, delayRender, continueRender } from "remotion";
 import { styleFor, jitterFor, positionFor } from "./animations.js";
-import { AUDIO_FILE } from "./lyrics.generated.js";
+import { AUDIO_FILE, LEGACY_FONT_FILE, LEGACY_FONT_FAMILY } from "./lyrics.generated.js";
+
+// Legacy Preeti-era fonts (AMS/Ananda/Abhinav): load the actual .ttf through
+// the FontFace API -- a bare CSS font-family cannot name these fonts reliably
+// across Chromium sandbox profiles, but explicit bytes always register. The
+// FILE is copied into public/fonts by render.mjs; text arrives pre-converted
+// to Preeti key sequences (scripts/lrc_legacy.py), which these fonts map to
+// their real Devanagari glyphs.
+if (LEGACY_FONT_FILE) {
+  const handle = delayRender(`legacy font: ${LEGACY_FONT_FAMILY}`);
+  const face = new FontFace(
+    LEGACY_FONT_FAMILY,
+    `url('${staticFile("fonts/" + LEGACY_FONT_FILE)}') format('truetype')`,
+    { weight: "400" }
+  );
+  face
+    .load()
+    .then((loaded) => {
+      document.fonts.add(loaded);
+      continueRender(handle);
+    })
+    .catch((err) => {
+      console.error(`Legacy font failed: ${LEGACY_FONT_FAMILY}`, err);
+      continueRender(handle);
+    });
+}
 
 const FONT_FAMILY =
+  LEGACY_FONT_FAMILY ||
   process.env.LYRIC_FONT ||
   '"Noto Sans Devanagari", "Nirmala UI", "Microsoft New Tai Lue", "Segoe UI", sans-serif';
+
+// Legacy Preeti text is visual-order ASCII: applying fontWeight 700 makes
+// Chromium synthesize fake bold (double-draw smear), and letter-spacing
+// breaks the pre-base matra positioning that lives in the glyph order.
+const legacyTextStyle = LEGACY_FONT_FAMILY ? { fontWeight: 400 } : {};
 const clamp01 = (x) => Math.min(Math.max(x, 0), 1);
 const easeOut = (t) => 1 - Math.pow(1 - clamp01(t), 3);
 const easeIn = (t) => Math.pow(clamp01(t), 3);
@@ -127,6 +158,7 @@ export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, posit
   const textStyle = {
     fontFamily: FONT_FAMILY,
     fontWeight: 700,
+    ...(LEGACY_FONT_FAMILY ? { fontWeight: 400 } : {}),
     color,
     textShadow: shadow,
     fontSize,
