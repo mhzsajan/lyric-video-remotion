@@ -8,7 +8,6 @@ import { LRC_TEXT, AUDIO_FILE } from "./lyrics.generated.js";
 const parsed = parseLrc(LRC_TEXT);
 const WIDTH = Number(process.env.LYRIC_WIDTH || 1920);
 const HEIGHT = Number(process.env.LYRIC_HEIGHT || 1080);
-const FPS = Number(process.env.LYRIC_FPS || 60);
 
 // If the audio cannot be probed, fall back to the last cue plus a tail. A
 // slightly long clip is far safer than one that cuts the final line off.
@@ -22,8 +21,8 @@ export const RemotionRoot = () => {
     <Composition
       id="LyricOverlay"
       component={LyricOverlay}
-      durationInFrames={Math.round(FALLBACK_SECONDS * FPS)}
-      fps={FPS}
+      durationInFrames={Math.round(FALLBACK_SECONDS * 30)}
+      fps={30}
       width={WIDTH}
       height={HEIGHT}
       // ProRes 4444 = the alpha channel. Declared here so a bare
@@ -44,9 +43,14 @@ export const RemotionRoot = () => {
           }
         }
         const tail = parsed.cues.length ? parsed.cues[parsed.cues.length - 1].end : 0;
+        // FPS is a PROP, not an env var: env is baked into the cached webpack
+        // bundle, so a changed LYRIC_FPS was silently ignored on re-render and
+        // the returned metadata then overrode the CLI --fps flag. Props arrive
+        // at runtime and cannot go stale.
+        const fps = Number(props.fps) || 30;
         return {
-          durationInFrames: Math.round(Math.max(seconds, tail) * FPS),
-          fps: FPS,
+          durationInFrames: Math.round(Math.max(seconds, tail) * fps),
+          fps,
           width: WIDTH,
           height: HEIGHT,
           props: { ...props, cues: parsed.cues, seed: parsed.title || "song" },
@@ -63,6 +67,7 @@ export const RemotionRoot = () => {
         seed: parsed.title || "song",
         style: undefined,
         fontSize: 104,
+        fps: 30,
         color: "#ffffff",
         // Soft dark halo keeps white text legible over a bright camera feed
         // without needing a background plate.

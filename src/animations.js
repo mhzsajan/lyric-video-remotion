@@ -37,6 +37,7 @@ export const STYLES = [
   "typewriter",
   "blur-in",
   "zoom-through",
+  "glow",
 ];
 
 /**
@@ -55,6 +56,22 @@ export function styleFor(seedText, index, force) {
 export function jitterFor(seedText, index) {
   const rnd = seededRandom(hashString("jit:" + seedText) + index * 40503);
   return rnd();
+}
+
+/**
+ * Deterministic position for one cue in "roam" mode: each line appears at its
+ * own spot (measured from the reference video the user loved: positions vary
+ * line to line, biased to the upper two-thirds, x anywhere, never the bottom
+ * edge). Same seed -> same layout, every render.
+ */
+export function positionFor(seedText, index) {
+  const rnd = seededRandom(hashString("pos:" + seedText) + index * 2246822519);
+  // x: center-biased so long lines stay on-screen (padding already protects
+  // the edges, but extreme x would still clip shadows).
+  const x = 12 + rnd() * 40;          // 12%..52% offset from left
+  // y: upper two-thirds. Reference never put text in the bottom third.
+  const y = 8 + rnd() * 58;           // 8%..66% from top
+  return { x, y };
 }
 
 export { seededRandom, hashString };

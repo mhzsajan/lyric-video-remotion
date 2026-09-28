@@ -1,6 +1,6 @@
 import React from "react";
 import { AbsoluteFill, Audio, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
-import { styleFor, jitterFor } from "./animations.js";
+import { styleFor, jitterFor, positionFor } from "./animations.js";
 import { AUDIO_FILE } from "./lyrics.generated.js";
 
 const FONT_FAMILY =
@@ -54,6 +54,12 @@ export function cueStyle(style, p, q, j) {
       s.clipPath = `inset(0 ${(100 - w).toFixed(2)}% 0 0)`;
       break;
     }
+    case "glow":
+      // The reference-video look: white core with a soft bloom. Text-shadow
+      // carries the glow; scale eases from slightly larger (light gathering).
+      s.textShadow = `0 0 ${(18 + j * 14).toFixed(1)}px rgba(255,255,255,0.95), 0 0 ${(60 + j * 40).toFixed(1)}px rgba(255,255,255,0.55)`;
+      s.transform = `scale(${(1.04 - 0.04 * inE).toFixed(4)})`;
+      break;
     case "fade":
     default:
       break;
@@ -61,7 +67,7 @@ export function cueStyle(style, p, q, j) {
   return s;
 }
 
-export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, position, background }) => {
+export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, position, background, mode }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = frame / fps;
@@ -78,6 +84,21 @@ export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, posit
     center: { justifyContent: "center" },
     bottom: { justifyContent: "flex-end", paddingBottom: "9vh" },
   }[position || "center"];
+
+  // Roam mode: each line owns a seeded position (the reference-video style).
+  // Position comes from the CUE's own index, so the previous line keeps its
+  // spot while fading — the two briefly coexist at different places.
+  const roam = mode === "roam";
+  const layout = (cueIndex) => {
+    if (!roam) return null;
+    const p = positionFor(seed || "song", cueIndex);
+    return {
+      position: "absolute",
+      left: p.x + "%",
+      top: p.y + "%",
+      transform: "translate(-50%, -50%)",
+    };
+  };
 
   const frameStyle = {
     // "transparent" = alpha overlay (mov / ProRes 4444). A colour like
@@ -113,7 +134,26 @@ export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, posit
     textAlign: "center",
     whiteSpace: "pre-wrap",
     margin: 0,
+    // Roam text is positioned, not centered: cap the width so a long line
+    // wraps instead of crossing the whole frame.
+    ...(roam ? { maxWidth: "60vw" } : {}),
   };
+
+  if (roam) {
+    // In roam the outgoing line fades IN PLACE at its own position (measured
+    // behaviour of the reference video) instead of drifting to a fixed slot.
+    const prevPos = prev ? layout(prev.index) : null;
+    return (
+      <AbsoluteFill style={frameStyle}>
+        {prev && prevLife < 1 ? (
+          <div style={{ ...textStyle, ...prevPos, opacity: (1 - prevLife) * 0.75, fontSize: fontSize * 0.8 }}>
+            {prev.text}
+          </div>
+        ) : null}
+        <div style={{ ...textStyle, ...layout(cue.index), ...st }}>{cue.text}</div>
+      </AbsoluteFill>
+    );
+  }
 
   return (
     <AbsoluteFill style={frameStyle}>

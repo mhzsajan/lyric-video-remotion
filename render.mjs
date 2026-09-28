@@ -37,14 +37,19 @@ const PUBLIC = path.join(HERE, "public");
 
 const STYLES = [
   "fade", "rise", "pop", "slide-left", "slide-right",
-  "typewriter", "blur-in", "zoom-through",
+  "typewriter", "blur-in", "zoom-through", "glow",
 ];
 
 // -- args ------------------------------------------------------------------
 const argv = process.argv.slice(2);
 const flag = (name) => {
+  // Support BOTH "--name value" and "--name=value": only parsing the space
+  // form made "--fps=60" silently return null and fall back to the default
+  // (found via --debug-args: props said fps:30 while the user asked for 60).
   const i = argv.indexOf(name);
-  return i >= 0 ? argv[i + 1] : null;
+  if (i >= 0) return argv[i + 1];
+  const eq = argv.find((a) => a.startsWith(name + "="));
+  return eq ? eq.slice(name.length + 1) : null;
 };
 const has = (name) => argv.includes(name);
 
@@ -175,7 +180,10 @@ async function run(audioPath, lrcPath) {
   // `process.env.LYRIC_COLOR || "#ffffff"` yields "undefined": an invalid CSS
   // colour that silently renders the text black. Number("undefined") is NaN, so
   // the font size collapses to the browser default as well.
-  const props = {};
+  // FPS as a PROP (see Root.jsx): env vars get baked into the cached bundle
+  // and a changed LYRIC_FPS was silently ignored on re-render.
+  const fps = Number(flag("--fps")) || (PREVIEW ? 15 : FORMAT === "mov" ? 60 : 30);
+  const props = { fps };
   if (style) props.style = style;
   if (flag("--size")) props.fontSize = Number(flag("--size"));
   if (flag("--color")) props.color = flag("--color");
@@ -183,17 +191,28 @@ async function run(audioPath, lrcPath) {
   const seed = flag("--seed") || parsed.title || title;
   props.seed = seed;
   if (flag("--shadow")) props.shadow = flag("--shadow");
+  // --mode roam = every line appears at its own seeded position (the
+  // reference-video style); default keeps the centered stacked look.
+  if (flag("--mode")) props.mode = flag("--mode");
   // mp4 has no alpha: paint the background black so Add/Screen blend keying
   // is exact. mov keeps a transparent background.
   props.background = FORMAT === "mov" ? "transparent" : "#000000";
 
-  // Format-specific codec flags. ProRes 4444 carries a real alpha channel;
-  // H.264 cannot, so the mp4 is white-on-black for blend-mode keying.
+  // Format-specific codec flags. ProRes 4444 carries a real alpha channel
+  // and must stay PNG-frame (JPEG has no alpha); H.264 cannot hold alpha, so
+  // the mp4 is white-on-black for blend-mode keying and takes JPEG frames
+  // (~15% faster measured) plus 30fps to match the proven Videosync2 source.
   const formatFlags = PREVIEW
     ? ["--scale=0.25", "--fps=15", "--codec=h264", "--crf=30"]
     : FORMAT === "mov"
       ? ["--codec=prores", "--prores-profile=4444", "--pixel-format=yuva444p10le"]
-      : ["--codec=h264", "--crf=17", "--pixel-format=yuv420p"];
+      // NVENC (NVIDIA-only per Remotion docs) auto-enables when available;
+      // on AMD/Intel this silently falls back to software x264.
+      // NOTE: do NOT pass the CLI --fps here. It OVERRIDES the composition
+      // after metadata resolution and CLAMPS the frame count (a 30s
+      // composition came out as 900 frames = 15s -- half the song). FPS
+      // travels via props to calculateMetadata, which resolves it correctly.
+      : ["--codec=h264", "--crf=17", "--pixel-format=yuv420p", "--image-format=jpeg", "--hardware-acceleration=if-possible"];
 
   const cliArgs = [
     "render", "src/index.js", "LyricOverlay", outPath,
@@ -228,6 +247,7 @@ async function run(audioPath, lrcPath) {
     return;
   }
 
+  if (has("--debug-args")) console.log("  ARGS: " + JSON.stringify([cliJs, ...cliArgs], null, 1));
   execFileSync(process.execPath, [cliJs, ...cliArgs], {
     stdio: "inherit",
     cwd: HERE,
@@ -273,7 +293,9 @@ if (BATCH) {
       "    --preview        fast, small, no alpha -- check timing first",
       "    --no-audio       leave the audio track out of the output",
       "    --font <family>  font family to render with",
+      "    --mode <mode>    roam (random spot per line) | center (default)",
       "    --format <fmt>   mp4 (h264 black bg, default) | mov (prores alpha)",
+      "    --fps <n>        output frame rate (default: 30 mp4 / 60 mov)",
       "    --report-only    just print the cue list",
       "    --style <name>   pin one animation: " + STYLES.join(", "),
       "    --position <pos> top | center | bottom",
