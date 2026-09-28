@@ -6,7 +6,6 @@ import { AUDIO_FILE } from "./lyrics.generated.js";
 const FONT_FAMILY =
   process.env.LYRIC_FONT ||
   '"Noto Sans Devanagari", "Nirmala UI", "Microsoft New Tai Lue", "Segoe UI", sans-serif';
-
 const clamp01 = (x) => Math.min(Math.max(x, 0), 1);
 const easeOut = (t) => 1 - Math.pow(1 - clamp01(t), 3);
 const easeIn = (t) => Math.pow(clamp01(t), 3);

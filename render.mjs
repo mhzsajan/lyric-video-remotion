@@ -148,26 +148,36 @@ async function run(audioPath, lrcPath) {
   fs.mkdirSync(outDir, { recursive: true });
   const outPath = flag("--out") || path.join(outDir, title + ".mov");
 
-  const env = { ...process.env };
-  if (style) env.LYRIC_STYLE = style;
-  if (flag("--size")) env.LYRIC_FONT_SIZE = flag("--size");
-  if (flag("--color")) env.LYRIC_COLOR = flag("--color");
-  if (flag("--position")) env.LYRIC_POSITION = flag("--position");
-  env.LYRIC_SEED = flag("--seed") || parsed.title || title;
+  // Style travels as composition PROPS, not environment variables. Remotion
+  // statically replaces process.env.X at build time, and an unset variable
+  // becomes the literal string "undefined" -- truthy, so
+  // `process.env.LYRIC_COLOR || "#ffffff"` yields "undefined": an invalid CSS
+  // colour that silently renders the text black. Number("undefined") is NaN, so
+  // the font size collapses to the browser default as well.
+  const props = {};
+  if (style) props.style = style;
+  if (flag("--size")) props.fontSize = Number(flag("--size"));
+  if (flag("--color")) props.color = flag("--color");
+  if (flag("--position")) props.position = flag("--position");
+  const seed = flag("--seed") || parsed.title || title;
+  props.seed = seed;
+  if (flag("--shadow")) props.shadow = flag("--shadow");
 
   const cliArgs = [
     "render", "src/index.js", "LyricOverlay", outPath,
     ...(PREVIEW
       ? ["--scale=0.25", "--fps=15", "--codec=h264", "--crf=30"]
       : ["--codec=prores", "--prores-profile=4444", "--pixel-format=yuva444p10le"]),
+    "--props=" + JSON.stringify(props),
   ];
 
-  console.log("  seed : " + env.LYRIC_SEED);
+  console.log("  seed : " + seed);
   console.log("  mode : " + (PREVIEW ? "PREVIEW (no alpha, fast)" : "FINAL (ProRes 4444, alpha)") + "\n");
 
-  // Resolve the Remotion CLI entry and run it with the current node binary.
-  // Shelling out to `npx` is not portable: on Windows it is npx.cmd, which
-  // execFileSync cannot spawn without a shell.
+  // Only width/height/fps stay as env vars; they are plain numbers read with
+  // Number() and an unset one becomes NaN rather than a truthy string.
+  const env = { ...process.env };
+
   const cliJs = path.join(HERE, "node_modules", "@remotion", "cli", "remotion-cli.js");
   if (!fs.existsSync(cliJs)) {
     console.error("  Remotion CLI not found. Run: npm install");

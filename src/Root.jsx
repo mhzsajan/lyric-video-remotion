@@ -1,18 +1,17 @@
 ﻿import React from "react";
-import { Composition, Audio, staticFile } from "remotion";
+import { Composition, staticFile } from "remotion";
 import { getAudioDurationInSeconds } from "@remotion/media-utils";
 import { parseLrc } from "./parse-lrc.mjs";
 import { LyricOverlay } from "./LyricOverlay.jsx";
-
-// The .lrc is bundled at build time so rendering needs no file plumbing.
-// render.mjs regenerates this before each render.
 import { LRC_TEXT, AUDIO_FILE } from "./lyrics.generated.js";
 
 const parsed = parseLrc(LRC_TEXT);
-const WIDTH = 1920;
-const HEIGHT = 1080;
-const FPS = 60;
-// Fallback if the audio cannot be probed (e.g. probing in a browser context).
+const WIDTH = Number(process.env.LYRIC_WIDTH || 1920);
+const HEIGHT = Number(process.env.LYRIC_HEIGHT || 1080);
+const FPS = Number(process.env.LYRIC_FPS || 60);
+
+// If the audio cannot be probed, fall back to the last cue plus a tail. A
+// slightly long clip is far safer than one that cuts the final line off.
 const FALLBACK_SECONDS = Math.max(
   30,
   parsed.cues.length ? parsed.cues[parsed.cues.length - 1].end + 2 : 60
@@ -27,26 +26,24 @@ export const RemotionRoot = () => {
       fps={FPS}
       width={WIDTH}
       height={HEIGHT}
-      // ProRes 4444 = the alpha channel. Set on the composition so a bare
-      // `remotion render` is correct without extra flags.
+      // ProRes 4444 = the alpha channel. Declared here so a bare
+      // `remotion render` is correct with no extra flags.
       defaultCodec="prores"
       defaultProResProfile="4444"
-      // Match the video to the audio length so the overlay never runs short.
+      // Match the video to the song so the overlay never runs short.
       calculateMetadata={async ({ props }) => {
         let seconds = FALLBACK_SECONDS;
         if (AUDIO_FILE) {
           try {
-            // Must probe a resolved URL, not the bare "/name.mp3": the
-            // browser-side decoder cannot fetch a root-relative path.
+            // Probe a resolved URL, not the bare "/name.mp3": the browser-side
+            // decoder cannot fetch a root-relative path.
             const probed = await getAudioDurationInSeconds(staticFile(AUDIO_FILE));
             if (typeof probed === "number" && probed > 0) seconds = probed;
           } catch (e) {
-            // Keep the fallback; a slightly long clip is safer than a short one.
+            // keep the fallback
           }
         }
-        const tail = parsed.cues.length
-          ? parsed.cues[parsed.cues.length - 1].end
-          : 0;
+        const tail = parsed.cues.length ? parsed.cues[parsed.cues.length - 1].end : 0;
         return {
           durationInFrames: Math.round(Math.max(seconds, tail) * FPS),
           fps: FPS,
@@ -55,18 +52,22 @@ export const RemotionRoot = () => {
           props: { ...props, cues: parsed.cues, seed: parsed.title || "song" },
         };
       }}
-      props={{
+      // Style comes in as PROPS, not process.env. Remotion statically replaces
+      // process.env.X at build time, and an unset variable becomes the literal
+      // string "undefined" -- which is truthy, so `process.env.LYRIC_COLOR ||
+      // "#ffffff"` yields "undefined", an invalid CSS colour that silently
+      // renders black. Number("undefined") is NaN, so the font size collapses
+      // to the browser default too. Props cannot be mangled this way.
+      defaultProps={{
         cues: parsed.cues,
         seed: parsed.title || "song",
-        style: process.env.LYRIC_STYLE || undefined,
-        fontSize: Number(process.env.LYRIC_FONT_SIZE || 104),
-        color: process.env.LYRIC_COLOR || "#ffffff",
-        // A soft dark halo keeps white text legible over a bright camera feed
+        style: undefined,
+        fontSize: 104,
+        color: "#ffffff",
+        // Soft dark halo keeps white text legible over a bright camera feed
         // without needing a background plate.
-        shadow:
-          process.env.LYRIC_SHADOW ||
-          "0 3px 18px rgba(0,0,0,0.55), 0 0 60px rgba(0,0,0,0.35)",
-        position: process.env.LYRIC_POSITION || "center",
+        shadow: "0 3px 18px rgba(0,0,0,0.55), 0 0 60px rgba(0,0,0,0.35)",
+        position: "center",
       }}
     />
   );
