@@ -1,0 +1,7 @@
+node_modules/
+out/
+public/
+src/lyrics.generated.js
+demo/
+*.log
+.DS_Store

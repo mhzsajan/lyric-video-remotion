@@ -1,0 +1,60 @@
+// Seeded, deterministic animation selection.
+//
+// WHY THIS IS SEEDED, NOT Math.random():
+// You render this once and then use the file live. If the animation were
+// random per render, the same song would come out different every time and
+// your show file would stop matching the video. So every cue's style is
+// derived from (masterSeed, cueIndex) — stable across renders, machines and
+// re-runs, but still varied line to line so it does not feel mechanical.
+
+/** mulberry32 — small, fast, good enough distribution for style picking. */
+function seededRandom(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function hashString(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+export const STYLES = [
+  "fade",
+  "rise",
+  "pop",
+  "slide-left",
+  "slide-right",
+  "typewriter",
+  "blur-in",
+  "zoom-through",
+];
+
+/**
+ * Pick a style for one cue. Deterministic for a given (seed, index).
+ * @param {string} seedText  master seed — usually the song title
+ * @param {number} index     cue index
+ * @param {string} [force]   pin every cue to one style
+ */
+export function styleFor(seedText, index, force) {
+  if (force && STYLES.includes(force)) return force;
+  const rnd = seededRandom(hashString(String(seedText)) + index * 2654435761);
+  return STYLES[Math.floor(rnd() * STYLES.length) % STYLES.length];
+}
+
+/** Per-cue jitter so timings are not perfectly uniform frame to frame. */
+export function jitterFor(seedText, index) {
+  const rnd = seededRandom(hashString("jit:" + seedText) + index * 40503);
+  return rnd();
+}
+
+export { seededRandom, hashString };
