@@ -67,6 +67,11 @@ export const RemotionRoot = () => {
         seed: parsed.title || "song",
         style: undefined,
         fontSize: 104,
+        // Random font size: "word" varies every word of a line, "phrase"
+        // scales the whole line once, "off" disables. sizeVar is the max
+        // deviation from 1.0, clamped to 0.45 in render.mjs.
+        sizeMode: "word",
+        sizeVar: 0.15,
         fps: 30,
         color: "#ffffff",
         // Soft dark halo keeps white text legible over a bright camera feed

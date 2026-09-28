@@ -264,6 +264,20 @@ async function run(audioPath, lrcPath) {
   // --mode roam = every line appears at its own seeded position (the
   // reference-video style); default keeps the centered stacked look.
   if (flag("--mode")) props.mode = flag("--mode");
+  // Random font size. "word" varies each word of a line, "phrase" scales the
+  // whole line once, "off" disables it. --size-var is the max deviation from
+  // 1.0 (0.15 = 85%..115%) and is clamped: past 0.45 the small words stop
+  // being readable at 1080p, which is the opposite of what this is for.
+  const SIZE_MODE = flag("--size-mode") || "word";
+  if (!["off", "phrase", "word"].includes(SIZE_MODE)) {
+    console.error('  Unknown --size-mode "' + SIZE_MODE + '". Use word, phrase or off.');
+    process.exit(1);
+  }
+  props.sizeMode = SIZE_MODE;
+  const sizeVarRaw = Number(flag("--size-var"));
+  props.sizeVar = Number.isFinite(sizeVarRaw)
+    ? Math.min(Math.max(sizeVarRaw, 0), 0.45)
+    : 0.15;
   // mp4 has no alpha: paint the background black so Add/Screen blend keying
   // is exact. mov keeps a transparent background.
   props.background = FORMAT === "mov" ? "transparent" : "#000000";
@@ -290,9 +304,10 @@ async function run(audioPath, lrcPath) {
     ...(NO_AUDIO ? ["--muted"] : []),
     // Preview only needs to reach the last sung line: without this it renders
     // the full composition -- at 15 fps that stretches 25k frames into a
-    // 27-minute timeline and mostly encodes silence.
+    // 27-minute timeline and mostly encodes silence. -1: frame INDEX max is
+    // duration-1 (0-5242 of a 5242-frame comp is an off-by-one error).
     ...(PREVIEW && parsed.cues.length
-      ? ["--frames=0-" + Math.round((parsed.cues[parsed.cues.length - 1].end + 2) * 15)]
+      ? ["--frames=0-" + (Math.round((parsed.cues[parsed.cues.length - 1].end + 2) * 15) - 1)]
       : []),
     "--props=" + JSON.stringify(props),
   ];
@@ -371,6 +386,8 @@ if (BATCH) {
       "    --style <name>   pin one animation: " + STYLES.join(", "),
       "    --position <pos> top | center | bottom",
       "    --size <px>      font size (default 104)",
+      "    --size-mode <m>  word (vary each word) | phrase | off   (default word)",
+      "    --size-var <n>   how far sizes vary, 0..0.45 (default 0.15 = +-15%)",
       "    --color <#hex>   text colour",
       "    --seed <text>    animation seed (default: title from the .lrc)",
       "    --batch <dir>    render every audio+.lrc pair in a folder",

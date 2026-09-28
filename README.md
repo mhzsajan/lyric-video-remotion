@@ -65,6 +65,8 @@ Ableton and the video can never disagree.
 | `--style <name>` | Pin every line to one animation instead of mixing. |
 | `--position <pos>` | `top` / `center` / `bottom` (default `center`). |
 | `--size <px>` | Font size, default `104`. |
+| `--size-mode <m>` | Random size per `word` (default) or per `phrase`, or `off`. |
+| `--size-var <n>` | How far those sizes vary, `0`..`0.45` (default `0.15`). |
 | `--color <#hex>` | Text colour, default `#ffffff`. |
 | `--seed <text>` | Animation seed, default the `[ti:]` title. |
 | `--out <file>` | Explicit output path. |

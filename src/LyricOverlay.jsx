@@ -1,6 +1,6 @@
 import React from "react";
 import { AbsoluteFill, Audio, staticFile, useCurrentFrame, useVideoConfig, delayRender, continueRender } from "remotion";
-import { styleFor, jitterFor, positionFor } from "./animations.js";
+import { styleFor, jitterFor, positionFor, sizeFor } from "./animations.js";
 import { AUDIO_FILE, LEGACY_FONT_FILE, LEGACY_FONT_FAMILY } from "./lyrics.generated.js";
 
 // Legacy Preeti-era fonts (AMS/Ananda/Abhinav): load the actual .ttf through
@@ -37,6 +37,31 @@ const FONT_FAMILY =
 // Chromium synthesize fake bold (double-draw smear), and letter-spacing
 // breaks the pre-base matra positioning that lives in the glyph order.
 const legacyTextStyle = LEGACY_FONT_FAMILY ? { fontWeight: 400 } : {};
+
+// -- random font size (--size-mode phrase|word) -----------------------------
+//
+// WORD granularity is safe; LETTER granularity is not. Devanagari's
+// shirorekha -- the horizontal headline running across the top of a word --
+// is one continuous bar. Give two letters of the same word different sizes
+// and the bar visibly snaps in half. At a word boundary there is already a
+// natural gap in the headline, so sizing whole words changes nothing about
+// how the glyphs join. The Preeti key text is safe too: lrc_legacy.py splits
+// and rejoins on spaces, so word boundaries survive the conversion.
+//
+// Word multipliers are expressed as PERCENTAGES of the parent, not pixels,
+// so the outgoing line can still be shrunk as a whole (it renders at 0.62 /
+// 0.8 of the current size) without its words escaping that scale.
+function wordSpans(text, seed, index, amount) {
+  return text.split(" ").map((w, i) => (
+    <React.Fragment key={i}>
+      {i > 0 ? " " : null}
+      <span style={{ fontSize: (sizeFor(seed, index, amount, "w" + i) * 100).toFixed(2) + "%" }}>
+        {w}
+      </span>
+    </React.Fragment>
+  ));
+}
+
 const clamp01 = (x) => Math.min(Math.max(x, 0), 1);
 const easeOut = (t) => 1 - Math.pow(1 - clamp01(t), 3);
 const easeIn = (t) => Math.pow(clamp01(t), 3);
@@ -98,10 +123,25 @@ export function cueStyle(style, p, q, j) {
   return s;
 }
 
-export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, position, background, mode }) => {
+export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, position, background, mode, sizeMode, sizeVar }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = frame / fps;
+  const master = seed || "song";
+
+  // Random font size for this line. "phrase" scales the whole line once,
+  // "word" varies each word (the div stays at fontSize and the words carry
+  // relative sizes), anything else leaves the text exactly as it was.
+  const planSize = (text, index) => {
+    const amount = Number(sizeVar) || 0;
+    if (sizeMode === "phrase") {
+      return { size: fontSize * sizeFor(master, index, amount), content: text };
+    }
+    if (sizeMode === "word") {
+      return { size: fontSize, content: wordSpans(text, master, index, amount) };
+    }
+    return { size: fontSize, content: text };
+  };
 
   // Active cue = the last one that has started.
   let idx = -1;
@@ -155,6 +195,10 @@ export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, posit
   const prevSpan = prev ? prev.end - prev.time : 0;
   const prevLife = prevSpan > 0 ? clamp01(prevAge / prevSpan) : 1;
 
+  // Size plan, resolved once for both the current line and the outgoing one.
+  const cur = planSize(cue.text, cue.index);
+  const pv = prev ? planSize(prev.text, prev.index) : null;
+
   const textStyle = {
     fontFamily: FONT_FAMILY,
     fontWeight: 700,
@@ -174,15 +218,27 @@ export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, posit
   if (roam) {
     // In roam the outgoing line fades IN PLACE at its own position (measured
     // behaviour of the reference video) instead of drifting to a fixed slot.
+    // The entrance/exit transform (st) goes on an INNER element: putting it
+    // on the positioned div let glow's scale() overwrite translate(-50%,-50%)
+    // and the block hung off the right edge of the frame.
     const prevPos = prev ? layout(prev.index) : null;
     return (
       <AbsoluteFill style={frameStyle}>
         {prev && prevLife < 1 ? (
-          <div style={{ ...textStyle, ...prevPos, opacity: (1 - prevLife) * 0.75, fontSize: fontSize * 0.8 }}>
-            {prev.text}
+          <div
+            style={{
+              ...textStyle,
+              ...prevPos,
+              opacity: (1 - prevLife) * 0.75,
+              fontSize: pv.size * 0.8,
+            }}
+          >
+            {pv.content}
           </div>
         ) : null}
-        <div style={{ ...textStyle, ...layout(cue.index), ...st }}>{cue.text}</div>
+        <div style={{ ...textStyle, fontSize: cur.size, ...layout(cue.index) }}>
+          <div style={{ ...st, display: "inline-block" }}>{cur.content}</div>
+        </div>
       </AbsoluteFill>
     );
   }
@@ -199,16 +255,16 @@ export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, posit
           style={{
             ...textStyle,
             position: "absolute",
-            fontSize: fontSize * 0.62,
+            fontSize: pv.size * 0.62,
             opacity: (1 - prevLife) * 0.75,
             transform: `translateY(${-prevLife * 30}px)`,
           }}
         >
-          {prev.text}
+          {pv.content}
         </div>
       ) : null}
 
-      <div style={{ ...textStyle, ...st }}>{cue.text}</div>
+      <div style={{ ...textStyle, fontSize: cur.size, ...st }}>{cur.content}</div>
     </AbsoluteFill>
   );
 };

@@ -74,4 +74,31 @@ export function positionFor(seedText, index) {
   return { x, y };
 }
 
+/**
+ * Deterministic font-size multiplier in [1-amount, 1+amount].
+ *
+ * This is the random font size (--size-mode phrase|word). Two things decide
+ * how wide it may go:
+ *
+ *   - It must be NARROW. The point is that a line breathes, not that words
+ *     shout at the audience, so amount is clamped to 0.45 (55%..145%). Past
+ *     that the small words stop being readable at 1080p and the big ones
+ *     collide with the frame edge.
+ *   - It must be SEEDED, like every other choice here, so re-rendering the
+ *     show file produces the same layout.
+ *
+ * @param {string} seedText  master seed — usually the song title
+ * @param {number} index     cue index
+ * @param {number} amount    max deviation from 1.0; 0 means no variation
+ * @param {string} [salt]    distinguishes words inside one cue ("w0", "w1"...)
+ */
+export function sizeFor(seedText, index, amount, salt = "") {
+  const a = Math.min(Math.max(Number(amount) || 0, 0), 0.45);
+  if (!a) return 1;
+  const rnd = seededRandom(
+    hashString("size:" + salt + "|" + seedText) + index * 374761393
+  );
+  return 1 - a + rnd() * 2 * a;
+}
+
 export { seededRandom, hashString };
