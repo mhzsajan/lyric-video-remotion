@@ -8,6 +8,8 @@
  * Options
  *   --out <file>        output path (default: out/<song>.mov)
  *   --preview           fast, small, no alpha -- for checking timing only
+ *   --no-audio          text-only overlay: no audio track in the output
+ *   --font <family>     font family to render with (must be installed)
  *   --style <name>      pin every line to one animation instead of mixing
  *   --position <pos>    top | center | bottom        (default center)
  *   --size <px>         font size                    (default 104)
@@ -53,6 +55,7 @@ const positional = argv.filter((a, i) => {
 });
 
 const PREVIEW = has("--preview");
+const NO_AUDIO = has("--no-audio");
 const REPORT_ONLY = has("--report-only");
 const BATCH = flag("--batch");
 
@@ -141,8 +144,15 @@ async function run(audioPath, lrcPath) {
     return;
   }
 
-  const audioName = copyAudio(audioPath);
-  writeGenerated(lrcText, "/" + path.basename(audioName));
+  // --no-audio: the composition gets no <Audio> at all, so the .mov is a
+  // pure text overlay. --muted is passed anyway as belt-and-braces so no
+  // audio stream can ever appear in the container.
+  if (NO_AUDIO) {
+    writeGenerated(lrcText, "");
+  } else {
+    const audioName = copyAudio(audioPath);
+    writeGenerated(lrcText, "/" + path.basename(audioName));
+  }
 
   const outDir = path.join(HERE, "out");
   fs.mkdirSync(outDir, { recursive: true });
@@ -168,15 +178,28 @@ async function run(audioPath, lrcPath) {
     ...(PREVIEW
       ? ["--scale=0.25", "--fps=15", "--codec=h264", "--crf=30"]
       : ["--codec=prores", "--prores-profile=4444", "--pixel-format=yuva444p10le"]),
+    ...(NO_AUDIO ? ["--muted"] : []),
+    // Preview only needs to reach the last sung line: without this it renders
+    // the full composition -- at 15 fps that stretches 25k frames into a
+    // 27-minute timeline and mostly encodes silence.
+    ...(PREVIEW && parsed.cues.length
+      ? ["--frames=0-" + Math.round((parsed.cues[parsed.cues.length - 1].end + 2) * 15)]
+      : []),
     "--props=" + JSON.stringify(props),
   ];
 
   console.log("  seed : " + seed);
-  console.log("  mode : " + (PREVIEW ? "PREVIEW (no alpha, fast)" : "FINAL (ProRes 4444, alpha)") + "\n");
+  console.log(
+    "  mode : " +
+    (PREVIEW ? "PREVIEW (no alpha, fast)" : "FINAL (ProRes 4444, alpha)") +
+    (NO_AUDIO ? " | text-only, no audio track" : "") +
+    "\n"
+  );
 
   // Only width/height/fps stay as env vars; they are plain numbers read with
   // Number() and an unset one becomes NaN rather than a truthy string.
   const env = { ...process.env };
+  if (flag("--font")) env.LYRIC_FONT = flag("--font");
 
   const cliJs = path.join(HERE, "node_modules", "@remotion", "cli", "remotion-cli.js");
   if (!fs.existsSync(cliJs)) {
@@ -224,6 +247,8 @@ if (BATCH) {
       "    node render.mjs <audio> <lyrics.lrc> [options]",
       "",
       "    --preview        fast, small, no alpha -- check timing first",
+      "    --no-audio       leave the audio track out of the output",
+      "    --font <family>  font family to render with",
       "    --report-only    just print the cue list",
       "    --style <name>   pin one animation: " + STYLES.join(", "),
       "    --position <pos> top | center | bottom",

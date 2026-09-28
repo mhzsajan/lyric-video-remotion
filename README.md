@@ -4,9 +4,10 @@ Renders a **transparent lyric-text overlay** from a `.lrc` produced by
 [Song Timer](https://github.com/mhzsajan/songtimer), so you can drop lyrics onto
 a Videosync2 video layer in Ableton Live without re-typesetting anything.
 
-Output is **ProRes 4444 with a real alpha channel** (1920x1080, 60 fps) with the
-song's audio muxed in, so the finished `.mov` is self-contained and syncs
-against its own audio.
+Output is **ProRes 4444 with a real alpha channel** (1920x1080, 60 fps). By
+default the song's audio is muxed in so the finished `.mov` is self-contained
+and syncs against its own audio; with `--no-audio` you get a pure text-only
+overlay with no audio track at all.
 
 ## Quick start
 
@@ -21,6 +22,12 @@ node render.mjs song.mp3 song.lrc --preview
 
 # 3. the real thing
 node render.mjs song.mp3 song.lrc
+
+# 3b. text-only: no audio track in the output
+node render.mjs song.mp3 song.lrc --no-audio
+
+# 3c. pin a font (must be installed system-wide)
+node render.mjs song.mp3 song.lrc --no-audio --font "AMS Manthan"
 ```
 
 Output lands in `out/<song name>.mov`.
@@ -49,6 +56,8 @@ Ableton and the video can never disagree.
 | Flag | Meaning |
 |---|---|
 | `--preview` | Quarter size, 15 fps, h264, no alpha. Fast timing check. |
+| `--no-audio` | Leave the audio track out: pure text overlay for layering. |
+| `--font <family>` | Font family to render with (installed system-wide). |
 | `--report-only` | Print the cue list and exit. No render at all. |
 | `--style <name>` | Pin every line to one animation instead of mixing. |
 | `--position <pos>` | `top` / `center` / `bottom` (default `center`). |
@@ -75,8 +84,25 @@ clip, so a four-minute song lands around 1.5 GB and takes minutes to encode.
 ## Font
 
 Defaults to `"Noto Sans Devanagari", "Nirmala UI"` so Devanagari lyrics render
-correctly on Windows. Override with a `LYRIC_FONT` env var if you want a
-different face.
+correctly on Windows. Override with `--font "Family Name"` or a `LYRIC_FONT`
+env var.
+
+**Known limitation — the Nepali `01 Fonts` (AMS Manthan, AMS Aakash, Ananda
+Fanko 2, ...) cannot style Devanagari in Chromium, today.** They are legacy
+1990s-era fonts: their Unicode cmap maps ASCII (U+0020-U+007E) plus a handful
+of symbols and nothing else, and they carry no GSUB/GPOS shaping tables.
+Devanagari codepoints (U+0900-U+097F) are simply not in the font as far as a
+modern browser can see, so Chromium silently falls back per-character —
+verified by rendering the same frame with `--font "AMS Manthan"` and with
+`"Nirmala UI"` pinned: pixel-identical output. These fonts were designed for
+legacy Encoded-Nepali workflows (Preeti-like ASCII layouts), which is why they
+look right in old editors but do nothing here.
+
+To actually get an AMS look, the font needs a cmap that maps the Devanagari
+Unicode block plus OpenType shaping (GSUB/GPOS) — i.e. a converted/rebuilt
+version. Until one of these fonts is converted, Devanagari renders in the
+cascade (Nirmala UI on this machine). ASCII text (Latin) DOES pick up the
+selected font.
 
 ## Compositing notes
 
@@ -85,7 +111,8 @@ different face.
   a frame-rate mismatch makes the text drift against the camera.
 - Drop the `.mov` on a video layer **above** the camera layer, keyed normally.
   Because the background is true alpha, no keying is required.
-- The audio is included purely for sync. Mute the layer in the mix if the
-  camera feed already carries sound.
+- Without `--no-audio`, the audio is included purely for sync; mute the layer
+  in the mix if the camera feed already carries sound. With `--no-audio` the
+  `.mov` has no audio stream at all — align it by ear or against the clap.
 - Text sits in a soft dark halo (`--shadow` in `src/LyricOverlay.jsx`) so white
   text stays legible over a bright feed without a background plate.
