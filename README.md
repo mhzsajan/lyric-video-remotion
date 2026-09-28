@@ -4,10 +4,13 @@ Renders a **transparent lyric-text overlay** from a `.lrc` produced by
 [Song Timer](https://github.com/mhzsajan/songtimer), so you can drop lyrics onto
 a Videosync2 video layer in Ableton Live without re-typesetting anything.
 
-Output is **ProRes 4444 with a real alpha channel** (1920x1080, 60 fps). By
-default the song's audio is muxed in so the finished `.mov` is self-contained
-and syncs against its own audio; with `--no-audio` you get a pure text-only
-overlay with no audio track at all.
+Output is an **.mp4 (H.264, 1920x1080 at 30 fps)**: white text on a pure
+black background — in Videosync2 set the layer blend to **Add** or **Screen**
+and the black disappears over your camera feed. MP4 cannot carry an alpha
+channel; when you need true alpha use `--format mov` (ProRes 4444, large).
+By default the song's audio is muxed in so the file syncs against its own
+audio; with `--no-audio` you get a pure text-only render with no audio track
+at all.
 
 ## Quick start
 
@@ -30,7 +33,7 @@ node render.mjs song.mp3 song.lrc --no-audio
 node render.mjs song.mp3 song.lrc --no-audio --font "AMS Manthan"
 ```
 
-Output lands in `out/<song name>.mov`.
+Output lands in `out/<song name>.mp4` (or `.mov` with `--format mov`).
 
 ## Workflow
 
@@ -109,10 +112,12 @@ selected font.
 - The frame is **1920x1080 @ 60 fps** by design. If your Videosync2 project
   differs, change `WIDTH`/`HEIGHT`/`FPS` in `src/Root.jsx` **and** re-render —
   a frame-rate mismatch makes the text drift against the camera.
-- Drop the `.mov` on a video layer **above** the camera layer, keyed normally.
-  Because the background is true alpha, no keying is required.
+- Drop the `.mp4` on a video layer **above** the camera layer and set the
+  layer blend to **Add** or **Screen** — black becomes transparent, no keying
+  required. (A ProRes 4444 `.mov` from `--format mov` carries real alpha if
+  your host reads it.)
 - Without `--no-audio`, the audio is included purely for sync; mute the layer
   in the mix if the camera feed already carries sound. With `--no-audio` the
-  `.mov` has no audio stream at all — align it by ear or against the clap.
+  the output has no audio stream at all — align it by ear or against the clap.
 - Text sits in a soft dark halo (`--shadow` in `src/LyricOverlay.jsx`) so white
   text stays legible over a bright feed without a background plate.

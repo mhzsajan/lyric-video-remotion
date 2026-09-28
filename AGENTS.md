@@ -19,15 +19,18 @@ Nepali/Devanagari fonts from that folder's `01 Fonts` are installed system-wide.
 npm install                                     # once
 node render.mjs <audio> <lrc> --report-only     # cue list, no render
 node render.mjs <audio> <lrc> --preview         # fast, low-res, no alpha
-node render.mjs <audio> <lrc> --no-audio --font "AMS Manthan" --out "out/X.mov"
+node render.mjs <audio> <lrc> --no-audio --out "out/X.mp4"
 node render.mjs --batch <dir>                   # every audio+lrc pair in a folder
 npm run studio                                  # Remotion Studio
 ```
 
 `--no-audio` = text-only overlay, no audio stream in the output (verified via
-ffprobe: exactly one video stream). Final mode is `--codec=prores
---prores-profile=4444 --pixel-format=yuva444p10le`; never JPEG image format
-(no alpha).
+ffprobe: exactly one video stream). Default final is **.mp4** (h264 crf 17,
+yuv420p, JPEG frames, 30fps, black background — blend Add/Screen in
+Videosync2); `--format mov` switches to `--codec=prores --prores-profile=4444
+--pixel-format=yuva444p10le` for true alpha, which must stay PNG-frame.
+Never pass the CLI `--fps` flag — it clamps the frame count; fps goes via
+props (`--fps=60` on render.mjs is safe).
 
 ## Architecture
 
