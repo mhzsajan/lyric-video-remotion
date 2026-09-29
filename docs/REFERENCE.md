@@ -74,17 +74,19 @@ Our render starts black and begins at the first `.lrc` cue. Both cards are
 missing features, and the tail card is why the reference runs 20 s longer than
 ours. **Not implemented.**
 
-### 3.2 Long cues wrap onto two stacked lines
+### 3.2 Line height, and wrapping
 
 | | Reference | Ours |
 |---|---|---|
-| Block shape | up to 564 x 386 (two lines) | 590–826 wide x 83–104 tall, always **one** line |
 | Line height (core ≥200) | median **104 px** (75–146, n=9) | median **87 px** (83–104, n=5) |
+| Long cues | 2–3 stacked lines | wraps to 2 lines via `maxWidth: 60vw` |
 
-The reference breaks a long cue in half rather than letting it run the width of
-the frame, which is what makes it read as a composed frame instead of a
-subtitle. Our roam mode caps the block at `maxWidth: 60vw` but never inserts a
-break, so long cues stay one thin line.
+**Correction:** an earlier version of this doc claimed we "always" render one
+line. That was measured on Ritu, whose cues happen to be short. Allare's longest
+cue measures 2 lit bands at t=407 s, so wrapping already happens. The real
+difference is *when* it wraps — the reference breaks earlier and more often,
+which composes the frame instead of running a near-full-width line, because its
+text block is narrower than our 60vw.
 
 The reference's glyphs are taller than ours: **1.20x** on the survey's default
 sample, **1.29x** when sampling lyric frames only. At our default `--size 104`

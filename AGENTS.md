@@ -4,14 +4,54 @@ Orientation for humans and AI agents continuing work in this repo.
 
 ## What this is
 
-A Remotion pipeline that turns `song.mp3 + lyrics.lrc` into a **1920x1080@60
-ProRes 4444 (alpha) lyric overlay** for layering over a Videosync2 camera feed
-in Ableton Live. Timing comes from [Song Timer](https://github.com/mhzsajan/songtimer)
-— the `.lrc` is the single source of truth, shared with AbleSet/Ableton.
+A Remotion pipeline that turns `song.mp3 + lyrics.lrc` into a **1920x1080@30
+H.264 mp4 lyric overlay — white text on pure black, ~12 KB/s, no audio** — for
+layering over a Videosync2 camera feed in Ableton Live. Timing comes from
+[Song Timer](https://github.com/mhzsajan/songtimer); the `.lrc` is the single
+source of truth, shared with AbleSet/Ableton.
 
-Run everything from the repo root on Windows (bash). Source media lives in
+**mp4 cannot carry an alpha channel, and that is fine** — see
+"Transparency: what mp4 can and cannot do" below. The black background is keyed
+away by the **Add** or **Screen** layer blend in Videosync2, which is exactly
+what the reference video does (it is `yuvj420p`, no alpha either).
+
+`--format mov` still exists for genuine alpha (ProRes 4444) and costs ~3 GB per
+song. Only reach for it if the host cannot do blend modes.
+
+Run everything from the repo root on Windows. Source media lives in
 `D:\DB Project\Text Only Lyric Video Final\Final\<Song>\` (audio + `*.lrc`).
-Nepali/Devanagari fonts from that folder's `01 Fonts` are installed system-wide.
+
+## Making a new song — the whole procedure
+
+No setup step, no config to edit. One command per song:
+
+```bash
+cd C:\Users\o0o\tools\lyric-video-remotion
+
+node render.mjs "D:\DB Project\Text Only Lyric Video Final\Final\<Song>\<Song>.mp3" ^
+                "D:\DB Project\Text Only Lyric Video Final\Final\<Song>\<Song>.lrc" ^
+                --no-audio --legacy-font Abhinav.TTF --mode roam ^
+                --word-anim karaoke --letter-anim pop --letter-var 0.03 ^
+                --out "out\<Song> letter.mp4"
+```
+
+- **Font:** always `--legacy-font Abhinav.TTF`. Bare `--font` does **nothing**
+  for these fonts (gotcha #6). `render.mjs` finds the file in `01 Fonts` one
+  level up from the song folder — pass a bare filename, not a path.
+- **Output:** lands in `out\` (gitignored).
+- **Deliverable:** copy to
+  `D:\DB Project\Text Only Lyric Video Final\Final\<Song>\<Song> - Text Only.mp4`
+  once checked — that is the naming the existing files use.
+- **Before shipping:** run `--report-only` (instant, no render) to confirm the
+  cue count, and inspect one extracted frame. Wrong fonts have shipped twice in
+  this project; the check costs seconds.
+
+`--preview` renders quarter-size at 15 fps in about a minute. Use it to check
+the look, then re-render without it — **it is not the deliverable**.
+
+**Defaults if you pass nothing:** `--size-mode word --size-var 0.15
+--word-anim off --letter-anim off --letter-var 0 --mode center --size 104`.
+The command above is the intended house style, which is *not* the defaults.
 
 ## Commands
 
@@ -42,14 +82,37 @@ render.mjs            CLI. Parses args, prints the cue report, writes
 src/Root.jsx          <Composition id="LyricOverlay">. Duration = audio
                       length (probed) vs last cue, whichever is longer.
                       Style knobs travel as PROPS, not env vars (see gotchas).
-src/LyricOverlay.jsx  Pure function of frame -> text state. cueStyle() is
-                      exported for reuse without React. cue = last stamp <= t;
-                      previous line drifts up and away.
-src/animations.js     styleFor(seed, cueIndex, pin): deterministic per-line
-                      animation choice, so re-renders are reproducible.
+src/LyricOverlay.jsx  Pure function of frame -> text state. cueStyle(),
+                      wordState(), letterState() are exported for reuse
+                      without React. cue = last stamp <= t; previous line
+                      drifts up and away.
+src/animations.js     styleFor(sizeFor/jitterFor/positionFor): deterministic
+                      per-line and per-word choices, so re-renders reproduce.
+src/word-timing.js    wordTimings(cue, {anchors}): derives per-word times
+                      from a line-level cue. The beat-sync seam.
+src/letters.js        splitGraphemes() via Intl.Segmenter, letterSizePct(),
+                      LETTER_SIZE_CAP = 0.03 (the measured shirorekha limit).
 src/parse-lrc.mjs     LRC -> cues {time, end, text}. Handles [mm:ss.xx]
                       repeated stamps on one line (chorus expansion).
 ```
+
+**Docs**
+
+| File | What |
+|---|---|
+| `docs/REFERENCE.md` | everything measured off the target video, and the gaps vs ours |
+| `docs/FONTS.md` | the 15 legacy `01 Fonts` vs 9 Unicode fonts that need no transcoding |
+
+**Scripts** — all rerunnable; prefer these over re-deriving anything by hand
+
+| Script | What it proves |
+|---|---|
+| `scripts/lrc_legacy.py` | Unicode → Preeti key transcoding for `--legacy-font` |
+| `scripts/font_survey.py <folder>` | which fonts actually have Devanagari + GSUB/GPOS |
+| `scripts/reference_survey.py <a> [b]` | encode recipe, background purity, roam extent, line heights, glow curve |
+| `scripts/check_word_timing.mjs [lrc]` | word ordering, bounds, reassembly, beat-anchor clamping |
+| `scripts/check_letters.mjs [lrc]` | grapheme cases (`क्ष`, `नि`), lossless round-trip, size clamp |
+| `scripts/layout_encoder.py` | per-layout encoder, verified against `npttf2utf` |
 
 `src/lyrics.generated.js`, `public/`, `out/` are all gitignored — they are
 render inputs/outputs, not source.
@@ -190,8 +253,37 @@ mistake. This is a property of the script — any typesetter that lets you size
 two letters of a Devanagari word differently breaks it the same way, which is
 why **size is per-word** and animation can safely be per-letter.
 
-> Gotcha #7 below says size is per WORD, never per letter. That is still true
-> for anything above 0.03; the letter layer only reaches that far.
+> Gotcha #7 says size is per WORD, never per letter. That is still the rule —
+> the letter layer can only reach 0.03, which is the measured point at which
+> the headline starts to look broken.
+
+## Transparency: what mp4 can and cannot do
+
+**mp4/H.264 cannot carry an alpha channel. Not a settings problem — a format
+limit.** Do not spend time looking for a flag. These were all actually tried,
+not assumed:
+
+| Attempt | Result |
+|---|---|
+| h265 in mp4, `yuva420p` | `Loaded libx265 does not support alpha layer encoding` |
+| VP9 in webm via ffmpeg (hand-built) | alpha plane decodes flat opaque |
+| VP9 in webm via Remotion | `alpha_mode=1` tag is set — **but the alpha plane is flat 255, every pixel opaque** |
+| Real alpha PNG → VP9 | alpha lost |
+
+The VP9 case is the nastiest because it *looks* like it worked: ffprobe reports
+`TAG:alpha_mode=1` and the file is the right size on disk. Decoding it to PNG
+and sampling a pixel is the only way to catch it.
+
+**The file size question and the alpha question are the same question.** Text on
+black compresses to roughly 12 KB/s regardless of song length — a 7-minute song
+is ~5 MiB. The 3.2 GB `Allare - Text Only.mov` was purely `--format mov`
+(ProRes 4444 stores full RGBA every frame). Nothing about the content forced it.
+
+**So: black background + Add/Screen blend is the answer, not a compromise.**
+That is what the reference video does — `ritu-whisper.mp4` is `yuvj420p` with
+no alpha channel at all. Keep the background at pure `#000000`; any lift leaves
+a grey rectangle over the camera feed. `scripts/reference_survey.py` checks
+`background worst corner sum(RGB) = 0` on any file.
 
 ## Gotchas that cost us time (do not rediscover these)
 
@@ -215,34 +307,80 @@ why **size is per-word** and animation can safely be per-letter.
    `--legacy-font <file>`, which transcodes the lyrics to Preeti keys and
    registers the .ttf through FontFace. Full survey, and the list of Unicode
    fonts that need no transcoding at all, in **docs/FONTS.md**.
-7. **Random size is per WORD, never per letter.** Devanagari's shirorekha
-   (the headline bar) is continuous inside a word — two letters at different
-   sizes snap it in half. Word boundaries are already gaps, so they are safe.
-   See "Random font size" below.
+7. **Random size is per WORD by default, never per letter.** Devanagari's
+   shirorekha (the headline bar) is continuous inside a word — two letters at
+   different sizes snap it in half. Word boundaries are already gaps, so they
+   are safe. The `--letter-var` layer can only reach **0.03** for exactly this
+   reason; see "Per-letter animation and size" above for the measured table.
+8. **Measuring the shirorekha by top-of-glyph is invalid.** Comparing the
+   topmost lit row per column looks like it measures headline flatness, but
+   Devanagari matras (`ि`, `ँ`, `ौ`) legitimately rise *above* the headline,
+   so the metric reports "stepped" even at `--letter-var 0` where the bar is
+   provably intact. It was used to produce a wrong conclusion here. Judge the
+   headline by eye at 3× zoom, or measure a region with no matras.
+
+## Measuring video: traps that produce confidently wrong numbers
+
+Both of these produced numbers that looked reasonable and were wrong. Check
+before trusting any figure about a render.
+
+- **`cropdetect` with `reset=0` accumulates — it is a UNION, not per frame.**
+  `crop=…` is the running bounding box of everything seen so far, not the
+  current frame. It answers "what area does text ever occupy in this file",
+  which is useful, but reading it as a per-frame margin is wrong. It briefly
+  suggested 97.5% of frames touched a screen edge; that number was an artefact
+  of the union and of a render that predated the roam fix (`633b82b`).
+  Drop `reset=0` for per-frame boxes — it is then far slower.
+- **Pick a timestamp inside a cue, not near its end.** A cue is short; sampling
+  0.3 s after its last word gives a blank frame, and it looks like "no text
+  here". Scan a range first (cropdetect or a few `lit px` samples) to find where
+  the text actually is.
+
+## Shell/CLI traps on this machine (Windows, PowerShell)
+
+- **PowerShell reports successful `git`/`gh` as `NativeCommandError` with exit
+  code 1.** It prints git's stderr as an error record. Judge by the output
+  lines (`633b82b..8794c33  main -> main`), never by `$LASTEXITCODE`.
+- **Inline JSON in a command line breaks.** `--props='{"background":"transparent"}'`
+  fails with a JSON parse error. Write the props to a file and pass
+  `--props=path.json` (a BOM breaks it too — write it with Python or
+  `Set-Content -Encoding UTF8` and verify).
+- **Unescaped `|` inside a PowerShell `Select-String -Pattern`** is read as a
+  pipeline and floods the output with parameter errors.
+- **`render.mjs --frames N` does not limit the render** — it renders the whole
+  composition. For a single frame use `npx remotion still`.
+- **ffmpeg's `color=c=black@0.0` does not produce an alpha channel.** To build
+  a real transparent test image, write a PNG with Pillow instead.
 
 ## Render state
 
-- 2026-09-28: **Allare** delivered →
-  `D:\DB Project\Text Only Lyric Video Final\Final\Allare\Allare - Text Only.mov`
-  (3.2 GB ProRes, 417s, alpha verified with alphaextract: silent sections =
-  0.0). Correct fonts — 35/35 lines round-tripped. The 3.2 GB is why mp4 is
-  now the default: the same song as mp4 is ~5 MiB.
-- 2026-09-29: **Ritu** proof rendered to `out/Ritu.mp4` (2.98 MiB, 253s) and
-  measured against the reference: encode matches within 1.1 %, text matches
-  `Ritu.lrc`. See `docs/REFERENCE.md`.
-- **Deliverables that need re-creating:**
-  - `Final\Ritu\Ritu - Text Only.mp4` — **verified wrong**: at t=145 s it shows
-    text matching no cue in `Ritu.lrc` (our render correctly shows
-    `सजिलै माया पाउन,`, the cue at 144.17 s).
-  - `Final\Kali Kali\Kali Kali - Text Only.mp4` — user reports the fonts are
-    wrong; **not yet independently verified** (see Open work in REFERENCE.md).
-  - `Final\Allare\Allare - Text Only.mov` — fonts fine, but 3.2 GB; re-render
-    as mp4.
-- **Only Allare has been proven end-to-end** through `--legacy-font`. Kali Kali
-  and Ritu have never had a verified full render delivered, so run
-  `--report-only` first and inspect a frame before shipping either.
-- Next up: word-by-word animation and musical beat sync.
-- `out/demo.mov` was the first end-to-end proof (with audio embedded).
+**Proven and current** — `out/Allare letter.mp4`, 6.4 MiB, 417s, 1920x1080@30,
+h264, pure black, no audio, Abhinav, roam + word-by-word karaoke + per-letter
+pop. Verified: 109 cues, conjuncts and matras intact, shirorekha continuous at
+the capped size, text stays inside frame. This is the reference output for the
+current house style.
+
+`out/Allare wordanim.mp4` (6.1 MiB) is the same without the letter layer.
+
+**Delivered deliverables, all needing replacement:**
+
+| File | Problem |
+|---|---|
+| `Final\Allare\Allare - Text Only.mov` | 3.2 GB ProRes. Fonts correct (35/35 lines round-tripped). Re-render as mp4. |
+| `Final\Ritu\Ritu - Text Only.mp4` | **Verified wrong text**: at t=145 s it shows text matching no cue in `Ritu.lrc`. Our render correctly shows `सजिलै माया पाउन,` (the cue at 144.17 s). |
+| `Final\Kali Kali\Kali Kali - Text Only.mp4` | User reports wrong fonts. **Not independently verified.** |
+
+**Never delivered through `--legacy-font`:** Kali Kali, Ritu. Allare is the only
+song proven end to end. Run `--report-only` and inspect a frame before shipping
+either.
+
+**Not yet implemented** (all measured, see `docs/REFERENCE.md`): head and tail
+title cards, a white halo on *every* line (`glow` is one style in the pool, so
+most lines keep the default dark shadow). Wrapping to two lines already happens
+naturally via `maxWidth: 60vw` in roam mode — measured 2 lit bands on Allare's
+longest cue.
+
+**Next up:** beat sync, via the `wordTimings(cue, { anchors })` seam.
 
 ## Hygiene
 
