@@ -1,8 +1,8 @@
 # The reference look — `ritu-whisper.mp4`
 
-`D:\DB Project\Text Only Lyric Video Final\Perfect Example\ritu-whisper.mp4` is
-the file the user picked as **the** target look. This is what was measured off
-it, what our renderer already matches, and what it still does that we do not.
+`ritu-whisper.mp4` is the file the user picked as **the** target look. This is
+what was measured off it, what our renderer already matches, and what it still
+does that we do not.
 
 Everything here was measured with ffprobe/ffmpeg, not judged by eye. Re-run the
 measurements any time with:

@@ -19,7 +19,14 @@ what the reference video does (it is `yuvj420p`, no alpha either).
 song. Only reach for it if the host cannot do blend modes.
 
 Run everything from the repo root on Windows. Source media lives in
-`D:\DB Project\Text Only Lyric Video Final\Final\<Song>\` (audio + `*.lrc`).
+`E:\01 Ablenton All Files\AI Lyrical Video Working Folder\<Song>\` (audio +
+`*.lrc`); finished videos go to the `TEST OUTPUT` folder beside it.
+
+**Fonts live in a separate repo**, `nepali-legacy-fonts` (private), which owns
+the key layouts, the 214-font catalogue and the check that says whether a font
+can write a given song. This repo only *uses* fonts. Nothing about font
+*generation* belongs here — if you need a layout generated or a font
+investigated, that is the other repo. See [docs/FONTS.md](docs/FONTS.md).
 
 ## Requirements
 
@@ -45,22 +52,56 @@ No setup step, no config to edit. One command per song, **on a single line**
 (these run in PowerShell, where `^` and `\` line-continuations are a syntax
 error — a multi-line form will simply fail to parse):
 
+> **Check your own paths before copying a command from here.** The examples use
+> this machine's layout, which is `C:\Users\Admin\tools\` and `E:\01 Ablenton All
+> Files\AI Lyrical Video Working Folder\`. Earlier revisions of this file
+> carried a different user's `C:\Users\o0o\` and a `D:\DB Project\` that no
+> longer exists, and an agent that copied the command verbatim got a path error
+> before it rendered anything.
+
 ```powershell
-cd C:\Users\o0o\tools\lyric-video-remotion
-node render.mjs "D:\DB Project\Text Only Lyric Video Final\Final\<Song>\<audio>.mp3" "D:\DB Project\Text Only Lyric Video Final\Final\<Song>\<lrc>" --no-audio --legacy-font Abhinav.TTF --mode roam --word-anim karaoke --letter-anim pop --letter-var 0.03 --out "out\<Song> letter.mp4"
+cd C:\Users\Admin\tools\lyric-video-remotion
+node render.mjs "E:\01 Ablenton All Files\AI Lyrical Video Working Folder\<Song>\<audio>.mp3" "E:\01 Ablenton All Files\AI Lyrical Video Working Folder\<Song>\<lrc>" --no-audio --length 417.10 --size 128 --mode mix --mix-block 8 --word-anim karaoke --letter-anim pop --letter-var 0.03 --font-file "C:\Users\Admin\tools\nepali-legacy-fonts\fonts\yantramanav\Yantramanav-Black.ttf" --shadow "0 3px 14px rgba(0,0,0,0.8)" --out "out\<Song>.mp4"
 ```
 
 **The `.lrc` filename does not always match the song name.** Allare's is
-`Allare Timmed.lrc`, not `Allare.lrc`. `Get-ChildItem "…\Final\<Song>" -Filter *.lrc`
+`Allare Remotion.lrc`, not `Allare.lrc`. `Get-ChildItem "<folder>" -Filter *.lrc`
 to get the real name before rendering.
 
-- **Font:** always `--legacy-font Abhinav.TTF`. Bare `--font` does **nothing**
-  for these fonts (gotcha #6). `render.mjs` finds the file in `01 Fonts` one
-  level up from the song folder — pass a bare filename, not a path.
+- **Font — read this before choosing.** The order below is not a preference, it
+  is a risk order. Pick the first one that gives you the look you want:
+
+  | | flag | risk |
+  |---|---|---|
+  | **1. Unicode** | `--font-file <ttf>` | **None.** No layout, no transcoding, no way to lose a character. Start here. |
+  | **2. Legacy, correctly mapped** | `--font-slug <slug>` | Real, but bounded — the layout comes from the font repo with the `.ttf`, so it cannot silently fall back to the wrong map. |
+  | **3. Legacy, hand-wired** | `--legacy-font <ttf>` | Highest. A missing `--layout-file` falls back to Preeti and renders *wrong letters with no error*. |
+
+  The old advice here was "always `--legacy-font Abhinav.TTF`", and that is how
+  two videos shipped with wrong letters: `Abhinav.TTF` has **0** Devanagari
+  codepoints, so it is a legacy font, and it was being used without a layout
+  check. `Abhinav` is a real display face and worth using — via `--font-slug`,
+  after `check_song.py` passes, not as an unconditional default.
+
+  Bare `--font` does nothing for a legacy font (gotcha #6). `render.mjs` finds
+  a bare filename one level up in `01 Fonts`; pass a full path with
+  `--font-file`.
+
+- **Before any legacy font renders**, check the song, not just the font:
+
+  ```powershell
+  py C:\Users\Admin\tools\nepali-legacy-fonts\scripts\check_song.py --font <slug> "<song>.lrc"
+  ```
+
+  Exit 1 means do not render that song in that font. A legacy font that passes
+  every layout check can still be unable to write your lyrics — on Allare,
+  **all 79** layouts fail, so no legacy font is a safe fallback there. Full
+  explanation in the font repo's `docs/SONG-CHECK.md`.
+
 - **Output:** lands in `out\` (gitignored).
 - **Deliverable:** copy to
-  `D:\DB Project\Text Only Lyric Video Final\Final\<Song>\<Song> - Text Only.mp4`
-  once checked — that is the naming the existing files use.
+  `E:\01 Ablenton All Files\AI Lyrical Video Working Folder\TEST OUTPUT\<Song>.mp4`
+  once checked.
 - **Before shipping:** run `--report-only` (instant, no render) to confirm the
   cue count, and inspect one extracted frame. Wrong fonts have shipped twice in
   this project; the check costs seconds.
@@ -87,6 +128,17 @@ node render.mjs <audio> <lrc> --preview         # fast, low-res, for checking lo
 node render.mjs <audio> <lrc> --no-audio --out "out/X.mp4"
 node render.mjs --batch <dir>                   # every audio+lrc pair in a folder
 npm run studio                                  # Remotion Studio
+
+# fonts -- see "Making a new song" for the risk order. These are the three:
+node render.mjs <audio> <lrc> --font-file <ttf>              # Unicode: safe
+node render.mjs <audio> <lrc> --font-slug ams-manthan        # legacy + its layout
+node render.mjs <audio> <lrc> --legacy-font <ttf> --layout-file <json>
+
+# can this font write this song? (font repo; exits 1 if not)
+py ..\nepali-legacy-fonts\scripts\check_song.py --font <slug> <lrc>
+
+# which Unicode faces are worth looking at
+node scripts/contact_sheet.mjs --audio <audio> --lrc <lrc> --size 64
 ```
 
 `--no-audio` = text-only overlay, no audio stream in the output (verified via
@@ -550,6 +602,11 @@ a grey rectangle over the camera feed. `scripts/reference_survey.py` checks
 23. **A legacy font whose layout VERIFIES is not a legacy font whose LYRICS
     survive** (gotcha 23). This is the distinction that matters and the one
     that is easiest to miss, because everything upstream of it looks healthy.
+
+    > The full write-up, the tool, and the Allare measurement live in the **font
+    > repo** at `nepali-legacy-fonts/docs/SONG-CHECK.md`. It is summarised here
+    > because the failure happens during a render in *this* repo, and an agent
+    > working here should not have to go looking to find out.
 
     `nepali-legacy-fonts` reports a font as *usable* when every key in its
     layout reaches a real glyph in its `.ttf`. That is a statement about the

@@ -111,7 +111,9 @@ Recorded so nobody re-chases them or "fixes" a non-bug.
 
 ## Source media layout
 
-`D:\DB Project\Text Only Lyric Video Final\Final\<Song>\` holds the audio and
-the lyrics, with `..\01 Fonts\` alongside. **The `.lrc` name does not always
-match the song**: Allare's is `Allare Timmed.lrc`. List the folder rather than
-assuming `<Song>.lrc`.
+`E:\01 Ablenton All Files\AI Lyrical Video Working Folder\<Song>\` holds the
+audio and the lyrics. **The `.lrc` name does not always match the song**: Allare's
+is `Allare Remotion.lrc`. List the folder rather than assuming `<Song>.lrc`.
+
+Legacy `.ttf` fonts are in `E:\01 Ablenton All Files\Arranged Lyrics & Songs\Final\01 Fonts\`.
+Unicode faces come from the font repo — see `docs/FONTS.md`.
