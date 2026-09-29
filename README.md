@@ -18,13 +18,25 @@ here means *blended away*, which is exactly what the reference video does: it is
 By default the song's audio is muxed in so the file syncs against its own audio;
 with `--no-audio` you get a pure text-only render with no audio track at all.
 
+## Requirements
+
+- **Node 16+** (tested on 24.18).
+- **Python on `PATH`** — required by `--legacy-font`, which every real render
+  uses. `render.mjs` shells out to `scripts/lrc_legacy.py` with no fallback, so
+  without Python it hard-crashes. The command it runs is literally `python`, so
+  a machine that only has the `py` launcher will fail with ENOENT.
+- `ffmpeg`/`ffprobe`, `pillow` and `fonttools` are only needed for the
+  verification scripts in `scripts/`, **not** to render — Remotion bundles its
+  own ffmpeg.
+
 ## The command to use
 
 ```bash
-node render.mjs song.mp3 song.lrc \
-  --no-audio --legacy-font Abhinav.TTF --mode roam \
-  --word-anim karaoke --letter-anim pop --letter-var 0.03
+node render.mjs song.mp3 song.lrc --no-audio --legacy-font Abhinav.TTF --mode roam --word-anim karaoke --letter-anim pop --letter-var 0.03
 ```
+
+(Written on one line on purpose: these run in PowerShell, where neither `^` nor
+`\` continues a line — a multi-line form fails to parse.)
 
 **`--legacy-font` is not optional for Nepali text.** The `01 Fonts` folder holds
 1990s-era fonts whose Unicode tables map ASCII and nothing else, so a plain
@@ -45,8 +57,7 @@ node render.mjs song.mp3 song.lrc --report-only
 node render.mjs song.mp3 song.lrc --legacy-font Abhinav.TTF --preview
 
 # 3. the real thing
-node render.mjs song.mp3 song.lrc --no-audio --legacy-font Abhinav.TTF \
-             --mode roam --word-anim karaoke --letter-anim pop --letter-var 0.03
+node render.mjs song.mp3 song.lrc --no-audio --legacy-font Abhinav.TTF --mode roam --word-anim karaoke --letter-anim pop --letter-var 0.03
 ```
 
 Output lands in `out/<song name>.mp4` (or `.mov` with `--format mov`).
@@ -61,7 +72,8 @@ song.mp3 + lyrics  ──►  Song Timer  ──►  song.lrc
    ableset.com/tools/lyrics-lrc                        this renderer
               │                                                       │
               ▼                                                       ▼
-     .als → Ableton + AbleSet                        ProRes 4444 (alpha)
+     .als → Ableton + AbleSet                    H.264 mp4, white on black
+              (blend Add/Screen)                        ~6 MiB, 30 fps
                                                               │
                                                               ▼
                                                     Videosync2 video layer

@@ -21,19 +21,35 @@ song. Only reach for it if the host cannot do blend modes.
 Run everything from the repo root on Windows. Source media lives in
 `D:\DB Project\Text Only Lyric Video Final\Final\<Song>\` (audio + `*.lrc`).
 
+## Requirements
+
+| Needed for | Must have | Notes |
+|---|---|---|
+| Any render | Node 16+ (tested on 24.18) | `Intl.Segmenter` needs 16+; there is a fallback, but don't rely on it |
+| **`--legacy-font`, i.e. every real render** | **`python` on PATH** | `render.mjs` shells out to `scripts/lrc_legacy.py` with **no fallback** — no Python, hard crash |
+| The measurement/verification scripts | `ffmpeg` + `ffprobe` on PATH, `pillow`, `fonttools` | Not needed to *render* — Remotion bundles its own ffmpeg |
+| Font survey | `fonttools` | `python scripts/font_survey.py <folder>` |
+
+Verified working: Node v24.18.0, Python 3.14.6, fontTools 4.65.0, Pillow 12.3.0.
+
+> On Windows the command called is literally `python`. If your machine only has
+> the `py` launcher, `render.mjs` will fail with ENOENT — use `python` or add a
+> shim.
+
 ## Making a new song — the whole procedure
 
-No setup step, no config to edit. One command per song:
+No setup step, no config to edit. One command per song, **on a single line**
+(these run in PowerShell, where `^` and `\` line-continuations are a syntax
+error — a multi-line form will simply fail to parse):
 
-```bash
+```powershell
 cd C:\Users\o0o\tools\lyric-video-remotion
-
-node render.mjs "D:\DB Project\Text Only Lyric Video Final\Final\<Song>\<Song>.mp3" ^
-                "D:\DB Project\Text Only Lyric Video Final\Final\<Song>\<Song>.lrc" ^
-                --no-audio --legacy-font Abhinav.TTF --mode roam ^
-                --word-anim karaoke --letter-anim pop --letter-var 0.03 ^
-                --out "out\<Song> letter.mp4"
+node render.mjs "D:\DB Project\Text Only Lyric Video Final\Final\<Song>\<audio>.mp3" "D:\DB Project\Text Only Lyric Video Final\Final\<Song>\<lrc>" --no-audio --legacy-font Abhinav.TTF --mode roam --word-anim karaoke --letter-anim pop --letter-var 0.03 --out "out\<Song> letter.mp4"
 ```
+
+**The `.lrc` filename does not always match the song name.** Allare's is
+`Allare Timmed.lrc`, not `Allare.lrc`. `Get-ChildItem "…\Final\<Song>" -Filter *.lrc`
+to get the real name before rendering.
 
 - **Font:** always `--legacy-font Abhinav.TTF`. Bare `--font` does **nothing**
   for these fonts (gotcha #6). `render.mjs` finds the file in `01 Fonts` one
@@ -45,6 +61,12 @@ node render.mjs "D:\DB Project\Text Only Lyric Video Final\Final\<Song>\<Song>.m
 - **Before shipping:** run `--report-only` (instant, no render) to confirm the
   cue count, and inspect one extracted frame. Wrong fonts have shipped twice in
   this project; the check costs seconds.
+
+> **Run `--report-only` WITHOUT `--legacy-font` to read the lyrics.** Console
+> output is deliberately ASCII-only (Windows mojibake), and `--legacy-font`
+> transcodes the text to Preeti keys *before* the report prints, so you get
+> `cfxf===` instead of `आहा...`. The cue count and timings are correct either
+> way; only the readable-text check needs the flag left off.
 
 `--preview` renders quarter-size at 15 fps in about a minute. Use it to check
 the look, then re-render without it — **it is not the deliverable**.
@@ -58,7 +80,7 @@ The command above is the intended house style, which is *not* the defaults.
 ```bash
 npm install                                     # once
 node render.mjs <audio> <lrc> --report-only     # cue list, no render
-node render.mjs <audio> <lrc> --preview         # fast, low-res, no alpha
+node render.mjs <audio> <lrc> --preview         # fast, low-res, for checking look only
 node render.mjs <audio> <lrc> --no-audio --out "out/X.mp4"
 node render.mjs --batch <dir>                   # every audio+lrc pair in a folder
 npm run studio                                  # Remotion Studio
@@ -69,8 +91,12 @@ ffprobe: exactly one video stream). Default final is **.mp4** (h264 crf 17,
 yuv420p, JPEG frames, 30fps, black background — blend Add/Screen in
 Videosync2); `--format mov` switches to `--codec=prores --prores-profile=4444
 --pixel-format=yuva444p10le` for true alpha, which must stay PNG-frame.
-Never pass the CLI `--fps` flag — it clamps the frame count; fps goes via
-props (`--fps=60` on render.mjs is safe).
+
+**Frame rate:** pass `--fps` to **render.mjs** (`--fps=60`) and it is forwarded
+as a composition prop. Do **not** pass `--fps` to the Remotion CLI directly
+(`npx remotion render …`) — that clamps the frame count and the metadata then
+overrides the prop. `package.json` has no `engines` field; Node 16+ is the real
+floor because `src/letters.js` uses `Intl.Segmenter`.
 
 ## Architecture
 
@@ -86,8 +112,9 @@ src/LyricOverlay.jsx  Pure function of frame -> text state. cueStyle(),
                       wordState(), letterState() are exported for reuse
                       without React. cue = last stamp <= t; previous line
                       drifts up and away.
-src/animations.js     styleFor(sizeFor/jitterFor/positionFor): deterministic
-                      per-line and per-word choices, so re-renders reproduce.
+src/animations.js     styleFor() / sizeFor() / jitterFor() / positionFor():
+                      deterministic per-line and per-word choices, so
+                      re-renders reproduce byte-for-byte.
 src/word-timing.js    wordTimings(cue, {anchors}): derives per-word times
                       from a line-level cue. The beat-sync seam.
 src/letters.js        splitGraphemes() via Intl.Segmenter, letterSizePct(),
@@ -164,10 +191,12 @@ unbroken, no overflow.
   choosing ProRes, from nothing else.
 - **The reference has no alpha channel either.** Its "transparent background"
   is black + Add/Screen blend, same assumption our mp4 makes.
-- **Still missing versus the reference:** head and tail title cards, two-line
-  wrapping for long cues, and a white halo on *every* line. `glow` exists but
-  is one style in the animation pool, so most lines get the default dark
-  shadow and a hard edge.
+- **Still missing versus the reference:** head and tail title cards, and a white
+  halo on *every* line. `glow` exists but is one style in the animation pool,
+  so most lines get the default dark shadow and a hard edge. (Wrapping to two
+  lines is *not* missing — roam mode's `maxWidth: 60vw` already does it,
+  measured 2 lit bands on Allare's longest cue. The reference simply wraps
+  earlier and more often.)
 - **Size:** reference line height is 1.20–1.29x ours, so a matching `--size`
   is roughly 125–134, not 104.
 - **Never use it for timing** — its cue times are ASR-derived and disagree with

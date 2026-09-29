@@ -2,7 +2,7 @@
   "name": "lyric-overlay-remotion",
   "version": "1.0.0",
   "private": true,
-  "description": "Renders a transparent lyric-text overlay (ProRes 4444) from a Song Timer .lrc, for layering over a Videosync2 camera feed in Ableton.",
+  "description": "Renders a lyric-text overlay (H.264 mp4, white on black, blended Add/Screen) from a Song Timer .lrc, for layering over a Videosync2 camera feed in Ableton.",
   "type": "module",
   "scripts": {
     "studio": "remotion studio src/index.js",
