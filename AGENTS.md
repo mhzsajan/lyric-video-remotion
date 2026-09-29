@@ -54,6 +54,42 @@ src/parse-lrc.mjs     LRC -> cues {time, end, text}. Handles [mm:ss.xx]
 `src/lyrics.generated.js`, `public/`, `out/` are all gitignored — they are
 render inputs/outputs, not source.
 
+## Random font size
+
+Every line can carry a different text size, seeded like everything else.
+
+```bash
+--size-mode word      # vary each word of a line   (default)
+--size-mode phrase    # vary the whole line once
+--size-mode off       # flat size, the old behaviour
+--size-var 0.15       # max deviation from 1.0; range 0..0.45, default 0.15
+```
+
+`--size-var 0.15` means 85%..115% of `--size` (default 104px). It is **clamped
+to 0.45 in render.mjs** on purpose: past that the small words stop being
+readable at 1080p and the big ones hit the frame edge, which is the opposite
+of the intent. If a render needs more drama, change `--seed` instead.
+
+Where it lives, in case it needs extending:
+
+| File | What |
+|---|---|
+| `src/animations.js` → `sizeFor(seed, index, amount, salt)` | seeded multiplier in `[1-amount, 1+amount]` |
+| `src/LyricOverlay.jsx` → `wordSpans()` / `planSize()` | turns that into spans |
+| `src/Root.jsx` `defaultProps` | `sizeMode: "word"`, `sizeVar: 0.15` |
+| `render.mjs` | parses and validates both flags |
+
+Two invariants worth preserving:
+
+- **Word multipliers are `%` of the parent, not pixels** — the outgoing line
+  renders at 0.62 (center) / 0.8 (roam) of the current size, and pixel-sized
+  words would escape that shrink.
+- **Seeded, never `Math.random`** — keyed on `(seed, cueIndex, "w"+wordIndex)`
+  so a re-render of the show file is byte-identical.
+
+Verified on a full 1920x1080 render of Allare: baseline flat, shirorekha
+unbroken, no overflow.
+
 ## Gotchas that cost us time (do not rediscover these)
 
 1. **process.env in components is statically replaced at build time.** An
@@ -70,11 +106,16 @@ render inputs/outputs, not source.
    breaks `--codec=h264` previews with a conflict error.
 5. **`--preview` caps frames at last cue +2s** — otherwise it renders the
    whole 417s timeline at 15fps, mostly silence.
-6. **Nepali "AMS/Ananda" fonts are legacy ASCII-mapped fonts** — see Font
-   section in README. `--font "AMS Manthan"` currently has NO effect on
-   Devanagari text: Chromium silently falls back to Nirmala UI per character
-   because the font's Unicode cmap covers ASCII only. Verified by rendering
-   identical frames with "AMS Manthan" vs "Nirmala UI" pinned.
+6. **Nepali `01 Fonts` (AMS/Ananda/Abhinav) are legacy ASCII-mapped fonts** —
+   0 Devanagari codepoints, no GSUB/GPOS, so `--font "AMS Manthan"` alone does
+   NOTHING: Chromium falls back per character. The working path is
+   `--legacy-font <file>`, which transcodes the lyrics to Preeti keys and
+   registers the .ttf through FontFace. Full survey, and the list of Unicode
+   fonts that need no transcoding at all, in **docs/FONTS.md**.
+7. **Random size is per WORD, never per letter.** Devanagari's shirorekha
+   (the headline bar) is continuous inside a word — two letters at different
+   sizes snap it in half. Word boundaries are already gaps, so they are safe.
+   See "Random font size" below.
 
 ## Render state
 

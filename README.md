@@ -103,11 +103,24 @@ verified by rendering the same frame with `--font "AMS Manthan"` and with
 legacy Encoded-Nepali workflows (Preeti-like ASCII layouts), which is why they
 look right in old editors but do nothing here.
 
-To actually get an AMS look, the font needs a cmap that maps the Devanagari
-Unicode block plus OpenType shaping (GSUB/GPOS) — i.e. a converted/rebuilt
-version. Until one of these fonts is converted, Devanagari renders in the
-cascade (Nirmala UI on this machine). ASCII text (Latin) DOES pick up the
-selected font.
+**That paragraph describes the problem, not the state of the repo.** The fix
+is *not* to convert the font — it is to convert the text:
+
+```bash
+node render.mjs <audio> <lrc> --legacy-font Abhinav.TTF
+```
+
+`render.mjs` transcodes the lyrics into the font's own key layout
+(`scripts/lrc_legacy.py`, Preeti by default), copies the `.ttf` into
+`public/fonts/`, and registers it through the FontFace API. A bare CSS
+`font-family` cannot do this on its own. Verified end to end: 35/35 lines
+round-tripped, rendered and inspected at 1920x1080.
+
+Fonts that need **no** transcoding at all — nine Unicode Devanagari families
+(Noto Sans/Serif, Mukta, Hind, Tiro, Yantramanav, Martel, Halant, Kalam),
+each verified with fontTools for Devanagari coverage and GSUB/GPOS shaping,
+all SIL OFL 1.1 and safe for broadcast — are listed in **`docs/FONTS.md`**.
+`python scripts/font_survey.py <folder>` re-runs that survey on any folder.
 
 ## Compositing notes
 
