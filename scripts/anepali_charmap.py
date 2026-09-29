@@ -146,14 +146,71 @@ def parse_slugs(html):
     return list(out)
 
 
+# CSS utilities that also begin with "font-" but name a weight or a generic
+# family, not a typeface from the catalogue. Tailwind's `font-bold` is not a
+# font called Bold.
+_STYLE_TOKENS = {
+    "font-sans", "font-serif", "font-mono", "font-size",
+    "font-thin", "font-extralight", "font-light", "font-normal",
+    "font-medium", "font-semibold", "font-bold", "font-extrabold",
+    "font-black",
+}
+
+
+def table_class(html, slug):
+    """The CSS class the page paints THIS font's table cells with.
+
+    It is not always "font-" + slug. The catalogue slug for AMS Calligraphy 1
+    is `ams-1`, but the page renders its cells as `font-ams-calligraphy-1`, so
+    asking for `font-ams-1` finds zero cells and the font is then classified
+    "the page publishes no character table" -- which is exactly how 8 fully
+    documented fonts came to be listed as NOTABLE.
+
+    The class is read off the page rather than guessed from the title (the
+    titles are no better: ams-calligraphy-9's real page is
+    ams-calligraphy-9-2). It is the token present on cells under EVERY
+    calibratable heading, so a utility class sitting in one section cannot win
+    an intersection. The slug's own class is preferred whenever it is present,
+    so the fonts that already worked read exactly as they did before.
+    """
+    default = "font-" + slug
+    wanted = [frag for frag, _ in SECTIONS]
+    common = None
+    for head_html, body in re.findall(
+        r"<h3[^>]*>(.*?)</h3>(.*?)(?=<h3|\Z)", html, re.S
+    ):
+        if not any(frag in strip_tags(head_html) for frag in wanted):
+            continue
+        toks = set()
+        for cl in re.findall(r'<span[^>]*?class="([^"]*)"', body):
+            for t in cl.split():
+                if t.startswith("font-") and t not in _STYLE_TOKENS:
+                    toks.add(t)
+        if not toks:
+            continue
+        common = toks if common is None else (common & toks)
+
+    if not common:
+        return default
+    if default in common:
+        return default
+    if len(common) == 1:
+        return common.pop()
+    # Several candidates survived: the one the page uses most is the font.
+    counts = {t: len(re.findall(r'<span[^>]*?\b' + re.escape(t) + r'\b', html))
+              for t in common}
+    return max(counts, key=counts.get)
+
+
 def read_table(html, slug):
     """Pull the key lists per category from one font page.
 
-    Every cell is <span class="... font-<slug>">KEY</span>. Cells are grouped
-    by the nearest preceding <h3>, so the section boundaries come from the
-    page rather than from a guess about how many keys each category has.
+    Every cell is <span class="... font-X">KEY</span>, where X is resolved by
+    table_class. Cells are grouped by the nearest preceding <h3>, so the
+    section boundaries come from the page rather than from a guess about how
+    many keys each category has.
     """
-    cls = "font-" + slug
+    cls = table_class(html, slug)
     sections = re.findall(
         r"<h3[^>]*>(.*?)</h3>(.*?)(?=<h3|\Z)", html, re.S
     )
@@ -299,6 +356,7 @@ def build_map(slug, html=None, order=None):
 
     character_map = {}
     problems = []
+    dropped = []
 
     for frag, slots in order.items():
         keys = tables.get(frag)
@@ -322,17 +380,44 @@ def build_map(slug, html=None, order=None):
             if not key:
                 continue
 
-            # Matras are published as a carrier consonant plus the mark --
-            # the section heading is "Matras - with 'ka'". The carrier's key
-            # is this font's own ka, so it has to come off before the key is
-            # usable: in AMS Manthan the cell reads "ka" but the matra is "a",
-            # and leaving the carrier on would write ka where a single a was
-            # meant -- every vowel then renders with a stray consonant in
-            # front of it.
-            if frag == "(Matras" and ka_key and key.startswith(ka_key):
-                key = key[len(ka_key):]
+            # Matras are published as the mark applied to a carrier "ka" --
+            # the section heading is "Matras - with 'ka'". The cell therefore
+            # CONTAINS the carrier, and the mark's own key is what remains.
+            #
+            # Which side the carrier sits on is not a detail: it is the
+            # font's visual-order convention, and getting it wrong inserts a
+            # whole spurious consonant. A PRE-BASE matra is stored AFTER its
+            # consonant in Unicode but must be DRAWN BEFORE it, so its cell
+            # reads mark-then-carrier -- AMS Manthan publishes ka+i-matra as
+            # "ik". Stripping only a prefix turned the mark into the two-key
+            # "ik", so the encoder wrote a KA where none belonged:
+            #     risle  ->  "ikr s a l a e"
+            # and the font dutifully drew  ka  i-matra  ra ... The render came
+            # out as "kisto" instead of "risle" -- valid, plausible, wrong.
+            #
+            # So: try prefix, then suffix, then accept the cell as-is. Never
+            # guess beyond those.
+            if frag == "(Matras" and ka_key:
+                if key.startswith(ka_key) and len(key) > len(ka_key):
+                    key = key[len(ka_key):]
+                elif key.endswith(ka_key) and len(key) > len(ka_key):
+                    key = key[:-len(ka_key)]
+                else:
+                    # The carrier is not separable; the cell is the mark.
+                    pass
                 if not key:
                     continue
+            # A cell that is already Devanagari is not a key at all. aNepali
+            # publishes one for the three slots Preeti has no key for --
+            # consonant slots 4, 9 and 35, which are NG, NYA and JNYA -- on
+            # every legacy page. Recorded as a key it would ask the transcoder
+            # to emit Devanagari into a font that has zero Devanagari
+            # codepoints, and those three characters would render as blank
+            # boxes. They are dropped instead, and the validator reports them,
+            # so a word containing JNYA is caught rather than shipped broken.
+            if DEVANAGARI_RE.search(key):
+                dropped.append((frag, uni, key))
+                continue
             # A key may legitimately appear in two categories -- legacy fonts
             # reuse one glyph slot for, say, a digit and a symbol. First
             # claim wins.
@@ -344,6 +429,17 @@ def build_map(slug, html=None, order=None):
         raise SystemExit(
             f"  No keys parsed from {SITE}/font/{slug}/.\n"
             f"  Sections found: {sorted(tables) or 'none'}"
+        )
+
+    # Report the dropped slots rather than letting them pass. A lyric
+    # containing one of these will render that character as a blank box, and
+    # a silent gap in the output is the worst kind of bug to chase later.
+    if dropped:
+        chars = ", ".join(sorted({u for _, u, _ in dropped}))
+        problems.append(
+            f"dropped {len(dropped)} slot(s) the site publishes as Devanagari "
+            f"rather than a key ({chars}): a legacy font has no Devanagari "
+            f"codepoints, so these would render as blank boxes"
         )
 
     layout = {
