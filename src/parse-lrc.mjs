@@ -22,9 +22,10 @@
 // median of 10s in Allare and 22s in Kali Kali, up to 70s -- which reads as a
 // freeze-frame rather than a lyric video.
 //
-// So when a `.ends.txt` companion exists (Song Timer's "For Remotion AI"
-// export), the real end is used. `endFrom` records which, so the cue report and
-// the preflight check can say where a given end came from instead of guessing.
+// So when an ends companion exists (Song Timer's "For Remotion AI" export,
+// <song>.remotion_end.lrc), the real end is used. `endFrom` records which, so
+// the cue report and the preflight check can say where a given end came from
+// instead of guessing.
 
 import { parseEnds } from "./parse-ends.mjs";
 

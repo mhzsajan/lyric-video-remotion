@@ -1,4 +1,5 @@
-// Read the companion <title>.ends.txt that Song Timer writes alongside the .lrc.
+// Read the companion <title>.remotion_end.lrc that Song Timer writes alongside
+// <title>.remotion_start.lrc.
 //
 // WHY A SEPARATE FILE
 // -------------------
@@ -6,8 +7,9 @@
 // MIDI clip, so a second stamp meaning "end" would show the same lyric twice in
 // Ableton -- and it would be indistinguishable from the existing convention
 // where several stamps mean the same line repeated. Song Timer therefore writes
-// the plain .lrc for AbleSet and this file for the renderer. See docs/ in
-// songtimer, and AGENTS.md.
+// the start file for AbleSet and this file for the renderer. The format is the
+// same pipe-separated table either way; only the name changed, so a folder
+// exported before the rename still parses. See docs/ in songtimer, and AGENTS.md.
 //
 // FORMAT
 // ------

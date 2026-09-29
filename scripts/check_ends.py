@@ -2,7 +2,7 @@
 
 WHY THIS EXISTS
 ---------------
-`parse-lrc.mjs` accepts a real end time from a Song Timer `.ends.txt` only if
+`parse-lrc.mjs` accepts a real end time from a Song Timer ends file only if
 it is later than its own start AND not later than the next line's start.
 Anything else is discarded and the cue falls back to an ESTIMATE, which is
 the lingering-lyric problem the ends file exists to solve.
@@ -14,14 +14,14 @@ as stale" and knowing that ten specific lines will hold for eight seconds
 each.
 
 The three rejection reasons, in the order they are checked:
-  no-key     the .ends.txt has no entry whose start matches this cue to the
+  no-key     the ends file has no entry whose start matches this cue to the
              centisecond
   ends-first  the end is at or before its own start
   overlap     the end runs past the NEXT line's start, which usually means a
              mismatched or hand-edited file
 
 Usage:
-    py scripts/check_ends.py "song.lrc" "song.ends.txt"
+    py scripts/check_ends.py "song.remotion_start.lrc" "song.remotion_end.lrc"
 """
 import argparse
 import os
@@ -156,7 +156,7 @@ def main():
         if any(why == "no-key" for i, c, why, en, g in rejected):
             print("  'no-key' means the two files disagree on the start time to\n"
                   "  the centisecond. Compare the [mm:ss.xx] in the .lrc with the\n"
-                  "  first column of the .ends.txt for the same line.")
+                  "  first column of the ends file for the same line.")
         if any(why == "overlap" for i, c, why, en, g in rejected):
             print("  'overlap' means a real end runs past the next line's start, so\n"
                   "  the file is mismatched or hand-edited.")

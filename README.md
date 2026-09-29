@@ -125,18 +125,29 @@ node render.mjs song.mp3 song.lrc --legacy-font ams.manthan.ttf --layout-file la
 npx remotion still src/index.js LyricOverlay out/check.png --frame=2400 --props=out/props.json
 ```
 
+**Check that the timings file was found.** The ends file is looked up by name
+beside the `.lrc`, so a rename on one side of the pair is silent: the render
+falls back to estimating every line end and exits 0. The cue report says which
+file it used, and `--report-only` costs nothing.
+
+```bash
+node scripts/check_pairing.mjs                             # the naming contract
+node render.mjs song.mp3 song.remotion_start.lrc --report-only   # -> "ends: N/N timed from ..."
+```
+
 ## Workflow
 
 ```
-song.mp3 + lyrics  ──►  Song Timer  ──►  song.lrc
-                                          │
-              ┌───────────────────────────┴───────────────────────────┐
-              │                                                       │
-   ableset.com/tools/lyrics-lrc                        this renderer
-              │                                                       │
-              ▼                                                       ▼
-     .als → Ableton + AbleSet                    H.264 mp4, white on black
-              (blend Add/Screen)                        ~6 MiB, 30 fps
+song.mp3 + lyrics  ──►  Song Timer  ──►  song.remotion_start.lrc
+                                                + song.remotion_end.lrc
+                                                              │
+              ┌───────────────────────────────────────────────┼───────────────────────────────┐
+              │                                               │                               │
+   song_ableset.lrc                              this renderer                      (song.obs.html
+              │                                               │                            for OBS)
+              ▼                                               ▼
+     .als → Ableton + AbleSet                 H.264 mp4, white on black
+              (blend Add/Screen)                       ~6 MiB, 30 fps
                                                               │
                                                               ▼
                                                     Videosync2 video layer
@@ -144,6 +155,12 @@ song.mp3 + lyrics  ──►  Song Timer  ──►  song.lrc
 
 The `.lrc` is the contract. Timing is authored **once** and consumed twice, so
 Ableton and the video can never disagree.
+
+Song Timer names each file for the target it is for, because the AbleSet and
+Remotion start files hold the same timestamps and are read by different
+programs. The end file is found beside the start file by name — pass either
+`.remotion_end.lrc` (current) or `--ends <file>`; the older `<song>.ends.txt`
+name is still accepted so folders exported before the rename keep rendering.
 
 ## Options
 

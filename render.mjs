@@ -310,13 +310,47 @@ async function run(audioPath, lrcPath) {
   const { parseLrc } = await import(
     "file://" + path.join(HERE, "src", "parse-lrc.mjs").replace(/\\/g, "/")
   );
-  // Song Timer's "For Remotion AI" export writes <song>.ends.txt next to the
-  // .lrc. It cannot go in the .lrc itself: AbleSet turns every timestamp into a
-  // MIDI clip, so a second stamp would show the lyric twice in Ableton.
-  // Looked up beside the .lrc by name, so any song folder works unchanged.
-  // Reading it is done HERE, not in parse-ends.mjs, because that module is
+  // Song Timer's "For Remotion AI" export writes the end timings in a
+  // companion file beside the .lrc. It cannot go in the .lrc itself: AbleSet
+  // turns every timestamp into a MIDI clip, so a second stamp would show the
+  // lyric twice in Ableton.
+  //
+  // It is named per target now -- Song.remotion_start.lrc beside
+  // Song.remotion_end.lrc -- because the AbleSet export is ALSO called
+  // Song.lrc, and two files with one name and different content is how the
+  // wrong one gets dragged into Ableton.
+  //
+  // Found by name, in order of preference: an explicit --ends, then the
+  // current Song.remotion_end.lrc, then the old Song.ends.txt. Folders
+  // exported before the rename must keep rendering, so neither convention is
+  // dropped.
+  //
+  // The "_start" has to come OFF the base before "_end" goes on. Deriving the
+  // end name by appending alone gave Song.remotion_start.remotion_end.lrc,
+  // which is not the name Song Timer writes -- so the lookup missed, the render
+  // fell back to estimating every end, and it exited 0. That is the exact
+  // failure the ends file exists to prevent, reintroduced by the rename.
+  //
+  // A separator is required before "start" so a song genuinely called
+  // "Restart" is not rewritten to "Re.remotion_end.lrc".
+  //
+  // Reading is done HERE, not in parse-ends.mjs, because that module is
   // bundled for the browser and cannot use "fs".
-  const endsPath = flag("--ends") || lrcPath.replace(/\.lrc$/i, ".ends.txt");
+  const lrcBase = lrcPath.replace(/\.lrc$/i, "");
+  const pairBase = lrcBase.replace(/[._-](?:remotion_)?start$/i, "");
+  const endsCandidates = flag("--ends")
+    ? [flag("--ends")]
+    : [
+        pairBase + ".remotion_end.lrc",
+        pairBase + ".ends.txt",
+      ];
+  const endsPath =
+    endsCandidates.find((p) => fs.existsSync(p)) || endsCandidates[0];
+  const endsFound = endsCandidates.some((p) => fs.existsSync(p));
+  // If the .lrc is clearly one half of a pair and no half was found, say so by
+  // name. "none found" alone is indistinguishable from never having tapped
+  // ends, and the two need different fixes.
+  const looksPaired = pairBase !== lrcBase;
   let endsText = null;
   if (fs.existsSync(endsPath)) {
     try {
@@ -375,7 +409,7 @@ async function run(audioPath, lrcPath) {
         console.error("  Only " + timed + " of " + parsed.cues.length +
           " ends could be applied; the rest were rejected as stale.");
       }
-      console.error("  That usually means the .lrc and the .ends.txt are from");
+      console.error("  That usually means the .lrc and the ends file are from");
       console.error("  different sessions, or the lyrics were re-timed after the");
       console.error("  ends were recorded.");
       console.error("");
@@ -387,7 +421,24 @@ async function run(audioPath, lrcPath) {
     }
   } else {
     console.log("  ends       : none found, estimating from the next line");
-    console.log("               (Song Timer 'For Remotion AI' writes one; put it beside the .lrc)");
+    if (looksPaired) {
+      // The .lrc is named like one half of a pair, so an ends file was
+      // expected. Name the exact path that was looked for: a wrong name is a
+      // rename away from working, and "none found" gives no way to find it.
+      console.log(
+        "               looked for " + path.basename(endsCandidates[0]) +
+          " and " + path.basename(endsCandidates[1]) +
+          " beside the .lrc -- neither is there"
+      );
+      console.log(
+        "               (Song Timer 'For Remotion AI' writes both halves; " +
+          "if you renamed one, rename the other to match)"
+      );
+    } else {
+      console.log(
+        "               (Song Timer 'For Remotion AI' writes one; put it beside the .lrc)"
+      );
+    }
   }
 
   // --check runs the preflight script and stops. At 25-30 songs this replaces
@@ -664,7 +715,7 @@ if (BATCH) {
       "    --legacy-font <f> use a Preeti-era font (.ttf), converting the lyrics\n                     to its key layout (needs python + npttf2utf);",
       "    --fps <n>        output frame rate (default: 30 mp4 / 60 mov)",
       "    --report-only    just print the cue list",
-      "    --ends <file>    end timings, default <song>.ends.txt beside the .lrc",
+      "    --ends <file>    end timings; by default looked for beside the .lrc as\n                     <song>.remotion_end.lrc, then <song>.ends.txt",
       "    --allow-stale-ends  render even if most ends cannot be applied",
       "    --check          preflight only: verify timings, then exit",
       "    --title-card     show the song title + band at the start",

@@ -460,6 +460,27 @@ a grey rectangle over the camera feed. `scripts/reference_survey.py` checks
     (`GraphQL: Name already exists`). Check `git remote -v` first and just
     push. Transient `Failed to connect to github.com:443` also happens here —
     retry.
+19. **The ends file is found by NAME, so renaming one half of the pair is
+    silent** (gotcha 19). `Song.remotion_start.lrc` looks for
+    `Song.remotion_end.lrc`; a miss falls back to estimating every end and
+    **exits 0** with a video whose lyrics linger for a median of 22s. This is
+    not hypothetical: the first version of the lookup appended the end suffix
+    without stripping the start infix, producing
+    `Song.remotion_start.remotion_end.lrc`, missing the file that Song Timer
+    actually writes.
+
+    Two rules follow. Derive the end name by **stripping then appending** —
+    `pairBase = base.replace(/[._-](?:remotion_)?start$/i, "")` — and require a
+    separator before `start`, or a song called `Restart` becomes
+    `Re.remotion_end.lrc`. And when a `.lrc` that is clearly half a pair has no
+    partner, **name the path that was looked for**: "none found" alone is
+    indistinguishable from never having tapped ends, and the two need
+    different fixes.
+
+    `node scripts/check_pairing.mjs` asserts the whole matrix (new name, old
+    name, mixed, `Restart`, missing partner, `--ends`) and fails if the pairing
+    regresses. It asserts on the line the render *prints*, because that is the
+    only thing that proves the ends reached the timeline.
 
 ## The shape of the roam audio bug, in one line
 
