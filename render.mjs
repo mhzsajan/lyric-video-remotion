@@ -378,13 +378,22 @@ async function run(audioPath, lrcPath) {
     ? ["--scale=0.25", "--fps=15", "--codec=h264", "--crf=30"]
     : FORMAT === "mov"
       ? ["--codec=prores", "--prores-profile=4444", "--pixel-format=yuva444p10le"]
-      // NVENC (NVIDIA-only per Remotion docs) auto-enables when available;
-      // on AMD/Intel this silently falls back to software x264.
       // NOTE: do NOT pass the CLI --fps here. It OVERRIDES the composition
       // after metadata resolution and CLAMPS the frame count (a 30s
       // composition came out as 900 frames = 15s -- half the song). FPS
       // travels via props to calculateMetadata, which resolves it correctly.
-      : ["--codec=h264", "--crf=17", "--pixel-format=yuv420p", "--image-format=jpeg", "--hardware-acceleration=if-possible"];
+      //
+      // --hardware-acceleration is deliberately ABSENT. Remotion ignores it
+      // whenever --crf is set and says so out loud:
+      //   "Hardware accelerated encoding disabled - "crf" option is not
+      //    supported with hardware acceleration"
+      // (verified on this machine). It was passed here until that was found;
+      // it did nothing on any hardware. crf is the right knob because it
+      // gives a predictable file size, and hardware encoding is NVENC-only
+      // anyway -- it would not help on AMD at all. An NVIDIA machine that
+      // actually wants the GPU encoder must switch to bitrate mode, which is
+      // a different quality/size trade-off and is not enabled by default.
+      : ["--codec=h264", "--crf=17", "--pixel-format=yuv420p", "--image-format=jpeg"];
 
   const cliArgs = [
     "render", "src/index.js", "LyricOverlay", outPath,

@@ -130,6 +130,7 @@ src/parse-lrc.mjs     LRC -> cues {time, end, text}. Handles [mm:ss.xx]
 
 | File | What |
 |---|---|
+| `docs/PLAYBOOK.md` | why Remotion, what actually made rendering fast (and what did not), animation guidance, Remotion-only traps |
 | `docs/REFERENCE.md` | everything measured off the target video, and the gaps vs ours |
 | `docs/FONTS.md` | the 15 legacy `01 Fonts` vs 9 Unicode fonts that need no transcoding |
 
@@ -350,6 +351,14 @@ a grey rectangle over the camera feed. `scripts/reference_survey.py` checks
    so the metric reports "stepped" even at `--letter-var 0` where the bar is
    provably intact. It was used to produce a wrong conclusion here. Judge the
    headline by eye at 3× zoom, or measure a region with no matras.
+9. **`--hardware-acceleration` is ignored whenever `--crf` is set.** Remotion
+   prints `"crf" option is not supported with hardware acceleration` and
+   encodes in software. The flag was on every render here until this was
+   found; it did nothing on any hardware. Removed. It is also NVENC-only, so
+   it would not help on AMD regardless.
+10. **Remotion's bundled ffmpeg is not system ffmpeg** — no `rawvideo` muxer,
+   no `signalstats`. Verification tricks against the bundled binary silently
+   produce nothing. Use system ffmpeg to measure.
 
 ## Measuring video: traps that produce confidently wrong numbers
 
