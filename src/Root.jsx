@@ -3,7 +3,7 @@ import { Composition, staticFile } from "remotion";
 import { getAudioDurationInSeconds } from "@remotion/media-utils";
 import { parseLrc } from "./parse-lrc.mjs";
 import { LyricOverlay } from "./LyricOverlay.jsx";
-import { LRC_TEXT, AUDIO_FILE } from "./lyrics.generated.js";
+import { LRC_TEXT, AUDIO_FILE, AUDIO_SECONDS } from "./lyrics.generated.js";
 
 const parsed = parseLrc(LRC_TEXT);
 const WIDTH = Number(process.env.LYRIC_WIDTH || 1920);
@@ -56,7 +56,14 @@ export const RemotionRoot = () => {
         // audio against a 415.3s cue -- the range ran past the end and Remotion
         // refused: "durationInFrames ... 6257, but frame range 0-6259". One
         // place decides the length, so the two can never disagree.
-        const full = Math.max(seconds, tail);
+        // An explicit duration from render.mjs wins. It exists for the
+        // --no-audio case, where there is no <Audio> in the composition to
+        // probe, so `seconds` stays at its fallback and the length collapses
+        // to wherever the last lyric was estimated to end -- which can be a
+        // minute before the song actually finishes. It is also the floor that
+        // keeps a slightly long clip: a video that outlasts the last line is
+        // harmless, one that cuts it off is not.
+        const full = Math.max(seconds, tail, Number(AUDIO_SECONDS) || 0);
         const duration = props.preview ? Math.min(full, tail + 2) : full;
         return {
           durationInFrames: Math.round(duration * fps),

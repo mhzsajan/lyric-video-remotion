@@ -351,13 +351,16 @@ a grey rectangle over the camera feed. `scripts/reference_survey.py` checks
    NOTHING: Chromium falls back per character. The working path is
    `--legacy-font <file>`, which transcodes the lyrics into the font's own key
    layout and registers the .ttf through FontFace.
-   **Most of them do NOT speak Preeti.** Preeti keys fed to `ams.manthan.ttf`
-   render collapsed glyphs and a literal `==` where the danda should be. For a
-   font outside npttf2utf's five layouts, generate its map first — see
-   **docs/FONTS.md** and
-   [nepali-legacy-fonts](https://github.com/mhzsajan/nepali-legacy-fonts):
-   `py scripts/anepali_charmap.py <slug> --out layouts/<slug>.json`, then
-   pass `--layout-file layouts/<slug>.json`.
+   **But prefer a Unicode font.** `--font "Nirmala UI"` has none of these
+   problems and needs nothing installed. Track B is only for a specific
+   classic look, and it does not work for most lyrics: measured on two songs,
+   **34 of 110 words** need a character (`्` virama, `ँ` candrabindu, `ञ`)
+   that a generated layout cannot encode, and those characters reach the font
+   unmapped so Chromium draws them in a *different* font — which is what makes
+   a word look like it has a stray `0` or `O` in it.
+   Never assume Abhinav's Preeti layout generalises: it is a property of the
+   layout that `npttf2utf` covers, not of the renderer. See **docs/FONTS.md**
+   and `scripts/passthrough.py`.
 8. **Random size is per WORD by default, never per letter.** Devanagari's
    shirorekha (the headline bar) is continuous inside a word — two letters at
    different sizes snap it in half. Word boundaries are already gaps, so they
@@ -393,13 +396,20 @@ a grey rectangle over the camera feed. `scripts/reference_survey.py` checks
     100–145 px off the left edge, and a held two-line block pushed 1000+ px of
     glow through the top. Kali Kali had rendered "clean" purely because its seed
     got lucky.
-14. **Verify the finished video, not the stills you grabbed while building.**
+14. **A `--no-audio` render with no `--length` ends where the last LYRIC ends,
+    not where the song does.** The composition cannot probe an audio it does
+    not have, so the length falls back to the last cue — and a `.lrc` records
+    only when a line *begins*, so that end is an estimate from the next line.
+    Measured: Kali Kali is 6:49.1 of audio, its last lyric ends at 5:47.5, and
+    the render stopped at 5:49.5 — the overlay ended while the song was still
+    playing. Pass `--length <seconds>` for every `--no-audio` render.
+15. **Verify the finished video, not the stills you grabbed while building.**
     A latent edge-clip can survive every spot check. Scan the whole file for
     content in the outer rows/columns —
     `ffmpeg -i out/X.mp4 -vf "fps=1/6,cropdetect=limit=0.04" -f null -` finds
     every instance in seconds. Both songs rescanned 100 % clean after the
     anchor fix.
-15. **`gh repo create --source . --push` fails if the remote already exists**
+16. **`gh repo create --source . --push` fails if the remote already exists**
     (`GraphQL: Name already exists`). Check `git remote -v` first and just
     push. Transient `Failed to connect to github.com:443` also happens here —
     retry.

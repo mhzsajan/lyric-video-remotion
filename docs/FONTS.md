@@ -116,7 +116,21 @@ A bare CSS `font-family` is **not** enough for these: Chromium sandbox
 profiles will not reliably resolve them by name, which is what made
 `--font "AMS Manthan"` look broken when the real fault was upstream.
 
-### ⚠️ Preeti is NOT a safe default for these fonts
+### ⚠️ Track B is not the default, and for most lyrics it does not work
+
+**Try Track A first.** If no specific classic typeface is required, a Unicode
+font removes every failure mode on this page at once — no transcoding, no
+layout file, no Python, and no possibility of a character rendering in the
+wrong typeface. `Nirmala UI` ships with Windows 11:
+
+```bash
+node render.mjs <audio> <lrc> --font "Nirmala UI"
+```
+
+Track B exists only for when you need a *specific* look no Unicode font
+provides. Read the rest of this section before choosing it.
+
+### Preeti is not a safe default for these fonts either
 
 The command above works **because Abhinav happens to be a Preeti font.** Most
 of the folder is not. Feeding Preeti keys to `ams.manthan.ttf` renders exactly
@@ -124,10 +138,48 @@ what Track B is supposed to prevent: glyphs collapsed onto each other and a
 literal `==` where the danda should be. AMS Manthan is a Kantipur-style
 layout — `k` / `Ka` / `ga`, nothing like Preeti's `s` / `v` / `u`.
 
-`lrc_legacy.py` knows five layouts (Preeti, Sagarmatha, Kantipur, PCS NEPALI,
-FONTASY_HIMALI_TT). Which one any given font speaks is not recorded anywhere —
-the font cannot say, because it has no Unicode cmap and no GSUB, and reading
-the meaning off glyph outlines has already been shown to be unreliable.
+### What actually goes wrong, measured
+
+Two real songs, 110 distinct lyric words, `ams.manthan`:
+
+**1. Three characters have no key, and they reach the font anyway.**
+`्` virama (21 words), `ँ` candrabindu (12), `ञ` (1) — **34 words affected**.
+aNepali publishes those slots as Devanagari, not as a key, so there is
+nothing to read. The character is passed through, the font has no glyph, and
+Chromium substitutes a different font for it. One word, two typefaces.
+
+This is why the failure looks like a typo rather than a bug: the passed-through
+character is not a key in that font at all, so what appears is whatever the
+*fallback* has for it — frequently reading as a stray `0` or `O` inside an
+otherwise correct word.
+
+Check before rendering anything:
+
+```bash
+py scripts/passthrough.py layouts/ams-manthan.json "song.lrc"
+```
+
+**2. Preeti does not save you either.** Abhinav works because `npttf2utf`
+supplies the virama key. That is a property of the *layout*, not of the
+renderer's ability — a generated layout has no virama and no way to derive
+one, so switching from one custom font to another does not fix it. Only the
+Preeti family is covered.
+
+**3. A generated layout can encode the wrong word silently.** The matra
+carrier has to come off both the Devanagari side and the key side. Miss the
+key side and `ि` becomes `ik` — two keys — and the encoder writes a stray KA:
+`रिसले` renders as `किस्तो`. Valid Devanagari, wrong word, no error.
+
+```bash
+py scripts/diag_encode.py layouts/ams-manthan.json --lrc "song.lrc"
+```
+
+**4. Read the render log.** `!! not round-trip exact: 'x' -> 'keys'` means
+that word is wrong. It fires on nearly every word of an AMS Manthan run and
+reads as noise. A clean run prints only `OK ... lines encoded`.
+
+Full write-up with measurements:
+[nepali-legacy-fonts/docs/LEGACY-PITFALLS.md](https://github.com/mhzsajan/nepali-legacy-fonts/blob/main/docs/LEGACY-PITFALLS.md).
 
 ### Generating a layout for the rest
 

@@ -129,6 +129,11 @@ def load_extra_layouts(path):
 # decode with their own inverse instead of the library.
 _SELF_DECODED = set()
 
+
+def _load_extra(path):
+    """Alias for callers that only want the side effect of merging a file."""
+    return load_extra_layouts(path)
+
 if FontMapper is not None:
     _FM = FontMapper(_MAP)
     _SUPPORTED = set(_FM.supported_maps)

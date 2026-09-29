@@ -88,6 +88,24 @@ const BATCH = flag("--batch");
 const LEGACY_LAYOUT = flag("--layout") || "Preeti";
 const LEGACY_LAYOUT_FILE = flag("--layout-file") || null;
 
+// HOW LONG THE VIDEO IS
+// --------------------
+// calculateMetadata sets the length to max(audio length, last cue end). When
+// the audio is muxed in, that probe is exact and nothing is needed.
+//
+// With --no-audio there is no audio in the composition to probe, so the
+// length collapses to "where the last lyric ends". The .lrc records only when
+// a line BEGINS, so that end is an ESTIMATE from the next line, and a song
+// whose final lyric is a minute before the last note gets a video a minute
+// short. Measured: Kali Kali is 6:49.1 of audio, its last lyric ends at
+// 5:47.5, and the render was 5:49.5 -- the overlay stopped while the song
+// was still playing.
+//
+// --length fixes it, and --no-audio without it now says so rather than
+// quietly producing a short file.
+const LENGTH = Number(flag("--length"));
+const explicitSeconds = Number.isFinite(LENGTH) && LENGTH > 0 ? LENGTH : 0;
+
 const pad = (s, n) => String(s).padEnd(n);
 const rpad = (s, n) => String(s).padStart(n);
 const rule = (label) => console.log("\n-- " + label + " " + "-".repeat(Math.max(0, 52 - label.length)));
@@ -150,7 +168,11 @@ function resolveLegacyFont(fileOrPath, lrcPath) {
   console.error("  Looked in: " + candidates.join("\n             "));
   process.exit(1);
 }
-function writeGenerated(lrcText, audioFile, legacy = null) {
+/**
+ * @param seconds explicit duration. See AUDIO_SECONDS below for why a
+ *   --no-audio render has to carry one.
+ */
+function writeGenerated(lrcText, audioFile, legacy = null, seconds = 0) {
   const esc = (s) =>
     s.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
   const body =
@@ -160,7 +182,10 @@ function writeGenerated(lrcText, audioFile, legacy = null) {
     "// Non-empty when rendering with a legacy Preeti-era font: the family to\n" +
     "// register via FontFace and the .ttf file name inside public/fonts/.\n" +
     "export const LEGACY_FONT_FILE = " + JSON.stringify(legacy ? legacy.file : "") + ";\n" +
-    "export const LEGACY_FONT_FAMILY = " + JSON.stringify(legacy ? legacy.family : "") + ";\n";
+    "export const LEGACY_FONT_FAMILY = " + JSON.stringify(legacy ? legacy.family : "") + ";\n" +
+    "\n// Explicit duration in seconds, when render.mjs could not let the\n" +
+    "// composition probe the audio. See AUDIO_SECONDS in render.mjs.\n" +
+    "export const AUDIO_SECONDS = " + (Number(seconds) || 0) + ";\n";
   fs.writeFileSync(GENERATED, body, "utf-8");
 }
 
@@ -392,14 +417,27 @@ async function run(audioPath, lrcPath) {
     return;
   }
 
-  // --no-audio: the composition gets no <Audio> at all, so the .mov is a
-  // pure text overlay. --muted is passed anyway as belt-and-braces so no
-  // audio stream can ever appear in the container.
+  // --no-audio: the composition gets no <Audio> at all, so the overlay is a
+  // pure text layer. --muted is passed anyway as belt-and-braces so no audio
+  // stream can ever appear in the container.
+  //
+  // That also means the composition cannot probe the audio for its length, so
+  // the length falls back to the last cue's estimated end. Warn loudly
+  // rather than shipping a file that stops before the song does.
+  if (NO_AUDIO && !explicitSeconds) {
+    console.warn(
+      "  note: --no-audio with no --length.\n" +
+      "        The video will end where the last lyric ends, which is an\n" +
+      "        ESTIMATE from the next line's start. If the song runs on\n" +
+      "        after the final lyric, this file will be short.\n" +
+      "        Pass --length <seconds> to set the real duration.\n"
+    );
+  }
   if (NO_AUDIO) {
-    writeGenerated(renderLrc, "", legacy);
+    writeGenerated(renderLrc, "", legacy, explicitSeconds);
   } else {
     const audioName = copyAudio(audioPath);
-    writeGenerated(renderLrc, "/" + path.basename(audioName), legacy);
+    writeGenerated(renderLrc, "/" + path.basename(audioName), legacy, explicitSeconds);
   }
 
   const outDir = path.join(HERE, "out");
@@ -490,14 +528,23 @@ async function run(audioPath, lrcPath) {
   // ----------------------
   // Remotion silently ignores --hardware-acceleration whenever --crf is set
   // and prints "crf option is not supported with hardware acceleration", so
-  // crf and the NVENC encoder are mutually exclusive. The way to actually use
-  // an NVIDIA encoder is bitrate mode: --video-bitrate instead of --crf. At
-  // 1080p, 8M measures the same as the crf-17 preset this file used, so
-  // --gpu swaps quality knob for a real GPU encode and nothing else.
+  // crf and a hardware encoder are mutually exclusive. The way to actually
+  // use one is bitrate mode: --video-bitrate instead of --crf. At 1080p, 8M
+  // measures the same as the crf-17 preset this file used, so --gpu swaps the
+  // quality knob for a real GPU encode and nothing else.
   //
-  // Measured on this machine (RTX 5070): see docs/GPU.md. It is opt-in
-  // because a bitrate target and a CRF are different quality/size trades --
-  // if you want a predictable file size, keep crf.
+  // The value is "if-possible", NOT "nvenc". Remotion takes no encoder name
+  // here -- the option is only disable | if-possible | required, and it picks
+  // whatever the machine's ffmpeg supports, so an AMD box uses VA-API and
+  // "nvenc" is not merely wrong but rejected outright before ffmpeg is ever
+  // reached:
+  //   Error: Invalid value for --hardware-acceleration: nvenc
+  // "required" is also wrong here: it fails the whole render when no
+  // hardware encoder exists, which is a worse outcome than quietly encoding
+  // in software. "if-possible" tries, and falls back rather than dying.
+  //
+  // --gl=angle (below) is the other half of the GPU: that is the headless
+  // Chromium rasteriser, and it is what draws the frames at all.
   const GPU = has("--gpu");
   const formatFlags = PREVIEW
     ? ["--scale=0.25", "--fps=15", "--codec=h264", "--crf=30"]
@@ -509,7 +556,7 @@ async function run(audioPath, lrcPath) {
       // travels via props to calculateMetadata, which resolves it correctly.
       : GPU
         ? ["--codec=h264", "--video-bitrate=8M", "--pixel-format=yuv420p",
-           "--image-format=jpeg", "--hardware-acceleration=nvenc"]
+           "--image-format=jpeg", "--hardware-acceleration=if-possible"]
         : ["--codec=h264", "--crf=17", "--pixel-format=yuv420p", "--image-format=jpeg"];
 
   // GPU rasterisation for the headless Chromium that draws the frames is a
