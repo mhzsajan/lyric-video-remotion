@@ -15,9 +15,11 @@ What follows is only what you need *at render time*.
 | **Legacy** | `--font-slug <slug>` or `--legacy-font` | Real. Check the song first — see below. |
 | **Default stack** | neither flag | Silent. See "the flag that looks ignored". |
 
-Reach for a Unicode font unless the typeface specifically matters. The 58
-Unicode faces are listed in the font repo's README; `out/contact-sheet.png`
-here renders 15 of them side by side.
+Reach for a Unicode font unless the typeface specifically matters — that is the
+**Tier A** answer when someone asks for a font that just works, and the only
+tier where a wrong character is impossible. The 58 Unicode faces are listed in
+the font repo's README; `out/contact-sheet.png` here renders 15 of them side by
+side. Tiers B and C are verified but carry the five known gaps below.
 
 ```bash
 # any .ttf, used exactly as it is
@@ -32,6 +34,9 @@ file, so you do not pass `--font` as well.
 A slug names a directory in the font repo. It resolves the `.ttf` *and* its
 generated layout, which is the whole point — a `.ttf` without its layout silently
 falls back to the Preeti-era map and renders that font's words wrong.
+
+The font repo ships **79 verified layouts** and a 42-font preferred list. Check
+there before generating one.
 
 ```bash
 node render.mjs song.mp3 song.lrc --font-slug ams-manthan

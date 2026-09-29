@@ -557,9 +557,9 @@ a grey rectangle over the camera feed. `scripts/reference_survey.py` checks
     font's keys — and for Allare they cannot:
 
     ```
-    12 of 35 lines (34%) contain a character with no key
-    U+0901 candrabindu  x13      U+094D virama  x11
-    15 distinct words affected
+    15 of 35 lines (43%) contain a character with no key
+    U+094D virama       x14     U+0901 candrabindu  x13
+    16 distinct words affected
     ```
 
     Measured on AMS Manthan, the one font the font repo calls *proven*. The
@@ -570,18 +570,33 @@ a grey rectangle over the camera feed. `scripts/reference_survey.py` checks
     !! not round-trip exact: 'हो.. खोला वारि म कहिले' -> 'hea.. Kaealaa vaair ma kihlae'
     ```
 
-    `फर्केर` becomes `फरकर` on screen — a **different word** — because the े matra
-    and the `र्` half-form are not in the layout. The render exits 0, the file
-    is the right length, the plate is pure black, and `check_output.py` passes
-    every check, because none of those can see a wrong letter.
+    `फर्केर` becomes `फरकर` on screen — a **different word** — and the reason is
+    worth being precise about, because it looks like a missing diacritic and is
+    not: the virama is the instruction that *fuses* a conjunct, so dropping it
+    splits one character into two letters. The candrabindu is the gentler
+    failure — `सँगै` → `संगै` changes the spelling, usually not the word.
 
-    So before choosing a legacy font for a song, convert the song and count what
-    does not survive. `scripts/lrc_legacy.py` prints the round-trip failures, and
-    any line it complains about is a line that will be wrong on screen. A **Unicode
-    font has no equivalent failure**: nothing is transcoded, so there is no
-    layout that can be wrong. That is why the default is Unicode, and why
-    "zero transcoding" beats "a nicer typeface" when the letters have to be
-    right.
+    **All 79 layouts fail this song**, confirmed across every layout rather than
+    just the one: aNepali publishes neither character as a key, so no generated
+    layout can contain them. No different legacy font helps.
+
+    The render exits 0, the file is the right length, the plate is pure black,
+    and `check_output.py` passes every check, because every check looks at the
+    container, the timing or the pixels *behind* the text, and none of them look
+    at the text.
+
+    So before choosing a legacy font for a song, run the song check in the font
+    repo — it exits non-zero, so it gates a render:
+
+    ```
+    py ..\nepali-legacy-fonts\scripts\check_song.py --font ams-manthan song.lrc
+    ```
+
+    A **Unicode font has no equivalent failure**: nothing is transcoded, so
+    there is no layout that can be wrong. That is the whole argument for **Tier
+    A** — the 58 Unicode faces — when anyone asks for a font that works without
+    issue, and why "zero transcoding" beats "a nicer typeface" when the letters
+    have to be right.
 
     Note also that a legacy font needs a different width model: the text handed
     to it is ASCII key sequences, so every character classifies as `space` and
