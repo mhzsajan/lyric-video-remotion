@@ -32,18 +32,58 @@ with `--no-audio` you get a pure text-only render with no audio track at all.
 ## The command to use
 
 ```bash
-node render.mjs song.mp3 song.lrc --no-audio --legacy-font Abhinav.TTF --mode roam --word-anim karaoke --letter-anim pop --letter-var 0.03
+```
+node render.mjs song.mp3 song.lrc --no-audio --length 409.13 --font "Nirmala UI" --size 128 --mode roam --word-anim karaoke --letter-anim pop --letter-var 0.03
 ```
 
 (Written on one line on purpose: these run in PowerShell, where neither `^` nor
 `\` continues a line — a multi-line form fails to parse.)
 
-**`--legacy-font` is not optional for Nepali text.** The `01 Fonts` folder holds
-1990s-era fonts whose Unicode tables map ASCII and nothing else, so a plain
-`--font` renders *nothing useful* and Chromium falls back per character —
-wrong-looking text with no error message. `--legacy-font` transcodes the lyrics
-into the font's own key layout and registers the `.ttf` properly. Any older
-advice to use `--font "AMS Manthan"` is a trap.
+**Start with a Unicode font.** `--font "Nirmala UI"` ships with Windows 11, so
+it needs no install, no transcoding and no layout file, and it cannot render a
+character in the wrong typeface. 58 of the fonts in
+[nepali-legacy-fonts](https://github.com/mhzsajan/nepali-legacy-fonts) are
+Unicode.
+
+**`--length` is required with `--no-audio`.** The composition probes the audio
+for its length only when the audio *is* in the composition. A text-only overlay
+has nothing to probe, so the length falls back to the last cue — and a `.lrc`
+records only when a line **begins**, so that end is a guess. Measured: Kali Kali
+is 6:49 of audio, its last lyric ends at 5:47, and the render stopped at 5:49 —
+the overlay ended while the song was still playing.
+
+## The legacy-font path is the exception
+
+`--legacy-font` is for a *specific* classic typeface that no Unicode font
+provides. It works, and it has real costs — measured on two songs, 110 distinct
+lyric words:
+
+| Character | Words | Consequence |
+|---|---:|---|
+| `्` virama | 21 | conjuncts unrenderable |
+| `ँ` candrabindu | 12 | आँ, सँ, कहिँ broken |
+| `ञ` | 1 | चञ्चल broken |
+
+**34 words** need a character the layout cannot encode. Those characters reach
+the font unmapped, so Chromium substitutes a *different* font for them alone —
+the word comes out in two typefaces, and the stray mark reads as a `0` or an
+`O` inside an otherwise correct word.
+
+Check before rendering anything:
+
+```bash
+py scripts/passthrough.py layouts/ams-manthan.json "song.lrc"
+py scripts/diag_encode.py layouts/ams-manthan.json --lrc "song.lrc"
+```
+
+And read the render log: `!! not round-trip exact: 'x' -> 'keys'` means that
+word is wrong. A clean run prints only `OK ... lines encoded`.
+
+**Do not assume one custom font's layout works for another.** Abhinav renders
+correctly because `npttf2utf` supplies the virama — a property of the *Preeti
+layout*, not of this renderer. Feeding Preeti keys to `ams.manthan.ttf` gives
+collapsed glyphs and a literal `==` where the danda should be. Full write-up:
+[LEGACY-PITFALLS.md](https://github.com/mhzsajan/nepali-legacy-fonts/blob/main/docs/LEGACY-PITFALLS.md).
 
 Order of work:
 
@@ -54,13 +94,23 @@ npm install                                  # once
 node render.mjs song.mp3 song.lrc --report-only
 
 # 2. fast low-res proof (~1 min) to eyeball the look
-node render.mjs song.mp3 song.lrc --legacy-font Abhinav.TTF --preview
+node render.mjs song.mp3 song.lrc --font "Nirmala UI" --preview
 
-# 3. the real thing
-node render.mjs song.mp3 song.lrc --no-audio --legacy-font Abhinav.TTF --mode roam --word-anim karaoke --letter-anim pop --letter-var 0.03
+# 3. the real thing. --length matters: without it a --no-audio render ends
+#    where the last lyric ends, which can be a minute before the song does.
+node render.mjs song.mp3 song.lrc --no-audio --length 409.13 --font "Nirmala UI" --size 128 --mode roam --word-anim karaoke --letter-anim pop --letter-var 0.03
 ```
 
 Output lands in `out/<song name>.mp4` (or `.mov` with `--format mov`).
+
+**Check a font before trusting it.** `--prepare-only` then one `still` frame
+costs seconds and is the only step that catches a wrong font — a bad layout
+does not error, it renders the wrong letters.
+
+```bash
+node render.mjs song.mp3 song.lrc --legacy-font ams.manthan.ttf --layout-file layouts/ams-manthan.json --prepare-only
+npx remotion still src/index.js LyricOverlay out/check.png --frame=2400 --props=out/props.json
+```
 
 ## Workflow
 
@@ -87,9 +137,14 @@ Ableton and the video can never disagree.
 | Flag | Meaning |
 |---|---|
 | `--preview` | Quarter size, 15 fps, h264. Fast look check — **not a deliverable**. |
-| `--no-audio` | Leave the audio track out: pure text overlay for layering. |
-| `--font <family>` | Font family for **Unicode** Devanagari fonts only. Useless for the `01 Fonts` set — use `--legacy-font`. |
-| `--legacy-font <f>` | **The one to use for Nepali.** Registers a Preeti-layout `.ttf` and transcodes the lyrics to match. |
+| `--no-audio` | Leave the audio track out: pure text overlay for layering. **Pair it with `--length`** — see below. |
+| `--length <s>` | Duration in seconds. **Required with `--no-audio`**, or the video ends where the last *lyric* ends rather than where the song does. |
+| `--font <family>` | A **Unicode** Devanagari font. **Try this first** — `--font "Nirmala UI"` needs nothing installed. |
+| `--legacy-font <f>` | A legacy ASCII-mapped font. Only for a specific classic look; see the warning below. |
+| `--layout <n>` | Key layout for `--legacy-font`. Default `Preeti`; wrong for most fonts. |
+| `--layout-file <j>` | Generated layout for a font outside npttf2utf's five. See [nepali-legacy-fonts](https://github.com/mhzsajan/nepali-legacy-fonts). |
+| `--prepare-only` | Transcode and register the font, then stop. Pair with `remotion still` to check a font in seconds. |
+| `--gpu` | Encode with the GPU (NVENC, or whatever the machine has). Faster but larger files — it cannot use `--crf`. |
 | `--report-only` | Print the cue list and exit. No render at all. |
 | `--style <name>` | Pin every line to one animation instead of mixing. |
 | `--position <pos>` | `top` / `center` / `bottom` (default `center`). |
