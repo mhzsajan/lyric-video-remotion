@@ -26,7 +26,7 @@
  * render box-drawing characters as mojibake.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -275,7 +275,30 @@ async function run(audioPath, lrcPath) {
   const { parseLrc } = await import(
     "file://" + path.join(HERE, "src", "parse-lrc.mjs").replace(/\\/g, "/")
   );
-  const parsed = parseLrc(renderLrc);
+  // Song Timer's "For Remotion AI" export writes <song>.ends.txt next to the
+  // .lrc. It cannot go in the .lrc itself: AbleSet turns every timestamp into a
+  // MIDI clip, so a second stamp would show the lyric twice in Ableton.
+  // Looked up beside the .lrc by name, so any song folder works unchanged.
+  // Reading it is done HERE, not in parse-ends.mjs, because that module is
+  // bundled for the browser and cannot use "fs".
+  const endsPath = flag("--ends") || lrcPath.replace(/\.lrc$/i, ".ends.txt");
+  let endsText = null;
+  if (fs.existsSync(endsPath)) {
+    try {
+      endsText = fs.readFileSync(endsPath, "utf-8");
+    } catch (err) {
+      console.error("  Could not read " + endsPath + ": " + err.message);
+    }
+  }
+  const parsed = parseLrc(renderLrc, endsText);
+  // The report is generated from the parse result, so it is the single source
+  // of truth for what was applied.
+  const endsFile = {
+    loaded: parsed.hasEnds || endsText != null,
+    problems: endsText == null ? [] : (await import(
+      "file://" + path.join(HERE, "src", "parse-ends.mjs").replace(/\\/g, "/")
+    )).parseEnds(endsText).problems,
+  };
 
   if (!parsed.cues.length) {
     console.error("  No timed lines found in the .lrc -- nothing to render.");
@@ -284,6 +307,58 @@ async function run(audioPath, lrcPath) {
   }
 
   report(parsed.cues, parsed.title || title);
+
+  // Say where the ends came from. A video that silently mixes real and guessed
+  // ends is impossible to trust, and this is the only place that shows it.
+  const timed = parsed.cues.filter((c) => c.endFrom === "timed").length;
+  if (endsFile.loaded) {
+    const pct = Math.round((timed / parsed.cues.length) * 100);
+    console.log("  ends       : " + timed + "/" + parsed.cues.length +
+      " timed from " + path.basename(endsPath) + " (" + pct + "%)");
+    if (endsFile.problems.length) {
+      console.log("               " + endsFile.problems.length +
+        " problem line(s) in that file, ignored:");
+      for (const p of endsFile.problems.slice(0, 5)) console.log("                 " + p);
+    }
+    // An ends file that mostly cannot be applied is the signature of a
+    // different take of the song. Rendering it anyway would quietly reproduce
+    // the old estimate while looking as though the ends had been applied, so
+    // it stops here and says why. --allow-stale-ends overrides.
+    if (timed < parsed.cues.length && !has("--allow-stale-ends")) {
+      console.error("");
+      if (timed === 0) {
+        console.error("  None of the ends in " + path.basename(endsPath) +
+          " match this .lrc.");
+      } else {
+        console.error("  Only " + timed + " of " + parsed.cues.length +
+          " ends could be applied; the rest were rejected as stale.");
+      }
+      console.error("  That usually means the .lrc and the .ends.txt are from");
+      console.error("  different sessions, or the lyrics were re-timed after the");
+      console.error("  ends were recorded.");
+      console.error("");
+      console.error("  Re-export both from Song Timer, or pass --allow-stale-ends");
+      console.error("  to render anyway using the estimates for the rest.");
+      console.error("");
+      process.exitCode = 1;
+      return;
+    }
+  } else {
+    console.log("  ends       : none found, estimating from the next line");
+    console.log("               (Song Timer 'For Remotion AI' writes one; put it beside the .lrc)");
+  }
+
+  // --check runs the preflight script and stops. At 25-30 songs this replaces
+  // discovering a mistimed chorus after a four-minute render.
+  if (has("--check")) {
+    const checker = path.join(HERE, "scripts", "check_song.mjs");
+    const code = spawnSync(process.execPath, [checker, lrcPath, endsPath], {
+      stdio: "inherit",
+      cwd: HERE,
+    }).status;
+    process.exitCode = code || 0;
+    return;
+  }
 
   if (REPORT_ONLY) return;
 
@@ -480,6 +555,9 @@ if (BATCH) {
       "    --legacy-font <f> use a Preeti-era font (.ttf), converting the lyrics\n                     to its key layout (needs python + npttf2utf);",
       "    --fps <n>        output frame rate (default: 30 mp4 / 60 mov)",
       "    --report-only    just print the cue list",
+      "    --ends <file>    end timings, default <song>.ends.txt beside the .lrc",
+      "    --allow-stale-ends  render even if most ends cannot be applied",
+      "    --check          preflight only: verify timings, then exit",
       "    --style <name>   pin one animation: " + STYLES.join(", "),
       "    --position <pos> top | center | bottom",
       "    --size <px>      font size (default 104)",
