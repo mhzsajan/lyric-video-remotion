@@ -90,6 +90,33 @@ Two invariants worth preserving:
 Verified on a full 1920x1080 render of Allare: baseline flat, shirorekha
 unbroken, no overflow.
 
+## The reference look
+
+`docs/REFERENCE.md` records what was measured off the user's target file,
+`Perfect Example/ritu-whisper.mp4`, and how our output compares. Short version:
+
+- **The encode recipe already matches** — mp4 / h264 / `yuvj420p` / 1920x1080 /
+  30 fps / no audio / pure black, at ~12 KB/s. Song length barely matters: a
+  7-minute song is ~5 MiB. The multi-gigabyte files in this project came from
+  choosing ProRes, from nothing else.
+- **The reference has no alpha channel either.** Its "transparent background"
+  is black + Add/Screen blend, same assumption our mp4 makes.
+- **Still missing versus the reference:** head and tail title cards, two-line
+  wrapping for long cues, and a white halo on *every* line. `glow` exists but
+  is one style in the animation pool, so most lines get the default dark
+  shadow and a hard edge.
+- **Size:** reference line height is 1.20–1.29x ours, so a matching `--size`
+  is roughly 125–134, not 104.
+- **Never use it for timing** — its cue times are ASR-derived and disagree with
+  the `.lrc`. Timing comes from Song Timer and nowhere else.
+
+Re-measure any file (and A/B it against ours) with:
+
+```bash
+python scripts/reference_survey.py <video>            # one file
+python scripts/reference_survey.py <reference> <ours> # A/B + suggested --size
+```
+
 ## Gotchas that cost us time (do not rediscover these)
 
 1. **process.env in components is statically replaced at build time.** An
@@ -119,10 +146,26 @@ unbroken, no overflow.
 
 ## Render state
 
-- 2026-09-28: **Allare** delivered (text-only, no audio) →
+- 2026-09-28: **Allare** delivered →
   `D:\DB Project\Text Only Lyric Video Final\Final\Allare\Allare - Text Only.mov`
-  (3.2 GB, 417s, alpha verified with alphaextract: silent sections = 0.0).
-- Pending: **Kali Kali**, **Ritu** (same folder, same one-command flow).
+  (3.2 GB ProRes, 417s, alpha verified with alphaextract: silent sections =
+  0.0). Correct fonts — 35/35 lines round-tripped. The 3.2 GB is why mp4 is
+  now the default: the same song as mp4 is ~5 MiB.
+- 2026-09-29: **Ritu** proof rendered to `out/Ritu.mp4` (2.98 MiB, 253s) and
+  measured against the reference: encode matches within 1.1 %, text matches
+  `Ritu.lrc`. See `docs/REFERENCE.md`.
+- **Deliverables that need re-creating:**
+  - `Final\Ritu\Ritu - Text Only.mp4` — **verified wrong**: at t=145 s it shows
+    text matching no cue in `Ritu.lrc` (our render correctly shows
+    `सजिलै माया पाउन,`, the cue at 144.17 s).
+  - `Final\Kali Kali\Kali Kali - Text Only.mp4` — user reports the fonts are
+    wrong; **not yet independently verified** (see Open work in REFERENCE.md).
+  - `Final\Allare\Allare - Text Only.mov` — fonts fine, but 3.2 GB; re-render
+    as mp4.
+- **Only Allare has been proven end-to-end** through `--legacy-font`. Kali Kali
+  and Ritu have never had a verified full render delivered, so run
+  `--report-only` first and inspect a frame before shipping either.
+- Next up: word-by-word animation and musical beat sync.
 - `out/demo.mov` was the first end-to-end proof (with audio embedded).
 
 ## Hygiene

@@ -82,9 +82,10 @@ Animations: `fade`, `rise`, `pop`, `slide-left`, `slide-right`, `typewriter`,
 result. That matters live: you render once, and the video must keep matching
 your show file. Change the look by changing `--seed`, not by re-rendering.
 
-**Always preview first.** ProRes 4444 at 1080p60 is ~29 MB for a 14-second
-clip, so a four-minute song lands around 1.5 GB and takes minutes to encode.
-`--preview` renders the same timing in seconds.
+**Always preview first.** The one ProRes render measured end to end — Allare,
+417 s at 1080p60 — came out at **3.2 GB** and took minutes to encode, roughly
+8 MB per second of video. `--preview` renders the same timing in seconds. The
+mp4 default costs ~12 KB/s instead, so a seven-minute song is about 5 MiB.
 
 ## Font
 
@@ -121,6 +122,22 @@ Fonts that need **no** transcoding at all — nine Unicode Devanagari families
 each verified with fontTools for Devanagari coverage and GSUB/GPOS shaping,
 all SIL OFL 1.1 and safe for broadcast — are listed in **`docs/FONTS.md`**.
 `python scripts/font_survey.py <folder>` re-runs that survey on any folder.
+
+## The target look
+
+The file this pipeline aims at is `Perfect Example/ritu-whisper.mp4` — a
+Remotion 4.0.526 render whose format our mp4 output already reproduces to
+within ~1% (same codec, pixel format, resolution, frame rate, no audio, ~12
+KB/s, pure black background). What it still does that we do not: head and tail
+title cards, wrapping long cues onto two lines, and a white halo on every line.
+
+All measurements are in **`docs/REFERENCE.md`**. Re-run them, or A/B a new
+render against the reference, with:
+
+```bash
+python scripts/reference_survey.py <video>                # one file
+python scripts/reference_survey.py <reference> <ours>     # A/B + suggested --size
+```
 
 ## Compositing notes
 
