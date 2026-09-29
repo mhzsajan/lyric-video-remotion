@@ -66,11 +66,21 @@ export function jitterFor(seedText, index) {
  */
 export function positionFor(seedText, index) {
   const rnd = seededRandom(hashString("pos:" + seedText) + index * 2246822519);
-  // x: center-biased so long lines stay on-screen (padding already protects
-  // the edges, but extreme x would still clip shadows).
-  const x = 12 + rnd() * 40;          // 12%..52% offset from left
-  // y: upper two-thirds. Reference never put text in the bottom third.
-  const y = 8 + rnd() * 58;           // 8%..66% from top
+  // x: width-safe band. The block is CENTERED on this anchor with a
+  // maxWidth of 60vw, so an anchor below 32% (or above 68%) can push a
+  // full-width line past the frame edge -- "Ritu"'s long chorus lines
+  // clipped 100+ px off the left at x=20%. Keeping the anchor in the
+  // middle 36% guarantees both edges of a 60vw block stay on-screen; it
+  // also keeps every position meaningfully off-center, which reads better
+  // than a hard clamp piling cues at 12%.
+  const x = 32 + rnd() * 36;          // 32%..68% from left
+  // y: upper two-thirds, top-safe. Reference never put text in the bottom
+  // third. Band starts at 24% because a wrapped 2-line block (fontSize
+  // 13vh x 1.32 lineHeight x 2 = ~34vh) centered on a lower anchor pushed
+  // its top through the frame edge -- "Ritu"'s held chorus line lost
+  // 1000+ px of glow into the top 3 rows at y=19.6%. 24% covers the
+  // 2-line worst case (17vh half-height + glow); no song cue wraps to 3.
+  const y = 24 + rnd() * 42;           // 24%..66% from top
   return { x, y };
 }
 
