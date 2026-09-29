@@ -345,11 +345,18 @@ async function run(audioPath, lrcPath) {
 
   // Say where the ends came from. A video that silently mixes real and guessed
   // ends is impossible to trust, and this is the only place that shows it.
-  const timed = parsed.cues.filter((c) => c.endFrom === "timed").length;
+  // "timed-clamped" counts: it came from the tapped file, adjusted to the
+  // next line's start because the singer's tail ran a fraction past it. Only
+  // "estimated" means the tapping was thrown away entirely.
+  const timed = parsed.cues.filter(
+    (c) => c.endFrom === "timed" || c.endFrom === "timed-clamped"
+  ).length;
+  const clamped = parsed.cues.filter((c) => c.endFrom === "timed-clamped").length;
   if (endsFile.loaded) {
     const pct = Math.round((timed / parsed.cues.length) * 100);
     console.log("  ends       : " + timed + "/" + parsed.cues.length +
-      " timed from " + path.basename(endsPath) + " (" + pct + "%)");
+      " timed from " + path.basename(endsPath) + " (" + pct + "%)" +
+      (clamped ? "  [" + clamped + " clamped to the next line's start]" : ""));
     if (endsFile.problems.length) {
       console.log("               " + endsFile.problems.length +
         " problem line(s) in that file, ignored:");

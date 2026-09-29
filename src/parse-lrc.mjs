@@ -102,17 +102,30 @@ export function parseLrc(text, endsText) {
     );
 
     const found = ends.get(key(c.time));
-    if (found) {
-      // Guard against a stale file: an end before its own start, or one that
-      // would outlast the next line by a wide margin, is a mismatched file
-      // rather than a real timing. The guess is safer than a nonsense value.
-      const overlapsNext = i + 1 < cues.length && found.end > cues[i + 1].time;
-      if (found.end > c.time && !overlapsNext) {
+    const nextTime = i + 1 < cues.length ? cues[i + 1].time : null;
+
+    if (found && found.end > c.time) {
+      // A real end that runs a fraction past the next line's start is NORMAL:
+      // it is the tail of the last syllable, and Song Timer stamps the line
+      // as finished a beat after the next one begins. It used to be
+      // discarded, which threw away a tapped timing for a 30 ms overshoot
+      // and fell back to an estimate -- the exact lingering-lyric problem the
+      // ends file exists to solve. On Allare that silently cost 10 of 109
+      // cues their real end.
+      //
+      // Clamp instead. The line still clears exactly when the next one
+      // appears, which is the correct visual either way, and the tapped data
+      // is kept.
+      if (nextTime !== null && found.end > nextTime) {
+        c.end = nextTime;
+        c.endFrom = "timed-clamped";
+      } else {
         c.end = found.end;
         c.endFrom = "timed";
-        return;
       }
+      return;
     }
+
     c.end = guess;
     c.endFrom = "estimated";
   });
