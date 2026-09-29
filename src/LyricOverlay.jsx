@@ -2,6 +2,7 @@ import React from "react";
 import { AbsoluteFill, Audio, staticFile, useCurrentFrame, useVideoConfig, delayRender, continueRender } from "remotion";
 import { styleFor, jitterFor, positionFor, sizeFor } from "./animations.js";
 import { wordTimings } from "./word-timing.js";
+import { splitGraphemes, letterSizePct } from "./letters.js";
 import { AUDIO_FILE, LEGACY_FONT_FILE, LEGACY_FONT_FAMILY } from "./lyrics.generated.js";
 
 // Legacy Preeti-era fonts (AMS/Ananda/Abhinav): load the actual .ttf through
@@ -143,7 +144,8 @@ export function wordState(mode, start, end, t, st) {
  * transform. The caller keeps it on the wrapping element.
  */
 function animatedWords(text, opts) {
-  const { seed, index, anim, sizeMode, sizeVar, t, cueTime, cueEnd } = opts;
+  const { seed, index, anim, sizeMode, sizeVar, t, cueTime, cueEnd,
+          letterAnim, letterSizeVar } = opts;
   const words = wordTimings({ text, time: cueTime, end: cueEnd });
   if (words.length === 0) return text;
 
@@ -157,6 +159,9 @@ function animatedWords(text, opts) {
       t,
       anim === "off" ? null : cueStyle(wordStyleFor(seed, index, i), 1, 0, 0)
     );
+    // When only the letter layer is active there is no per-word animation, so
+    // the word span must not carry the line's own opacity/transform or the
+    // letters would be animated on top of a second, conflicting transform.
     const pct =
       sizeMode === "word"
         ? (sizeFor(seed, index, amount, "w" + i) * 100).toFixed(2) + "%"
@@ -173,9 +178,96 @@ function animatedWords(text, opts) {
             ...ws,
           }}
         >
-          {w.text}
+          {letterNodes(w.text, {
+            seed, wordIndex: index, letterIndexBase: i,
+            letterSizeVar, letterAnim, t, wordStart: w.start, wordEnd: w.end,
+          })}
         </span>
       </React.Fragment>
+    );
+  });
+}
+
+// -- per-letter layer (--letter-anim, --letter-var) --------------------------
+//
+// Sits INSIDE each word span. Letters are grapheme clusters, not codepoints,
+// so conjuncts and pre-base matras survive intact -- see src/letters.js for why
+// that matters and what breaks otherwise.
+//
+// Two independent knobs:
+//
+//   --letter-anim  per-letter animation. Safe at any strength, because a
+//                  letter can appear without changing its size.
+//   --letter-var   per-letter SIZE. Clamped to LETTER_SIZE_CAP (0.12) because
+//                  the shirorekha is continuous across a word: past that, two
+//                  letters at different sizes visibly snap the headline in
+//                  half and the word stops looking typeset.
+export const LETTER_ANIMS = ["off", "fade", "rise", "pop", "wipe"];
+
+/** Visual state of one letter at time t, relative to its word's arrival. */
+export function letterState(mode, elapsed, letterIndex) {
+  if (mode === "off") return {};
+
+  // Each letter trails the one before it slightly, so a word reads as
+  // "unrolling" rather than every letter popping at once.
+  const delay = letterIndex * 0.035;
+  const p = clamp01((elapsed - delay) / 0.20);
+  const inE = easeOut(p);
+
+  if (mode === "fade") return { opacity: inE };
+  if (mode === "rise") {
+    return { opacity: inE, transform: `translateY(${(1 - inE) * 10}px)` };
+  }
+  if (mode === "pop") {
+    return {
+      opacity: inE,
+      transform: `scale(${(0.72 + 0.28 * inE).toFixed(4)})`,
+    };
+  }
+  if (mode === "wipe") {
+    // Clip each letter in from its own left edge, left to right.
+    return { opacity: 1, clipPath: `inset(0 ${((1 - inE) * 100).toFixed(1)}% 0 0)` };
+  }
+  return {};
+}
+
+/**
+ * Render one word's letters as spans. Returns the plain string when both
+ * letter features are off, so a normal render builds no extra nodes.
+ */
+function letterNodes(text, opts) {
+  const { seed, wordIndex, letterIndexBase, letterSizeVar, letterAnim, t,
+          wordStart } = opts;
+  const sizeOn = Number(letterSizeVar) > 0;
+  const animOn = letterAnim && letterAnim !== "off";
+  if (!sizeOn && !animOn) return text;
+
+  const letters = splitGraphemes(text);
+  // Nothing to vary in a single grapheme, and animating it would be a no-op.
+  if (letters.length < 2) return text;
+
+  const elapsed = t - (wordStart ?? t);
+  // letterIndexBase keeps the seed distinct from the word's own key, so the
+  // first letter of word 3 does not reuse word 0's values.
+  const base = wordIndex * 1000 + letterIndexBase * 100;
+
+  return letters.map((ch, i) => {
+    const style = {};
+    if (sizeOn) {
+      const pct = letterSizePct(letterSizeVar, seed, wordIndex, base + i);
+      if (pct) style.fontSize = pct;
+    }
+    if (animOn) Object.assign(style, letterState(letterAnim, elapsed, i));
+    return (
+      <span
+        key={i}
+        style={{
+          display: "inline-block",
+          ...style,
+        }}
+      >
+        {ch}
+      </span>
     );
   });
 }
@@ -234,26 +326,31 @@ export function cueStyle(style, p, q, j) {
   return s;
 }
 
-export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, position, background, mode, sizeMode, sizeVar, wordAnim }) => {
+export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, position, background, mode, sizeMode, sizeVar, wordAnim, letterAnim, letterVar }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = frame / fps;
   const master = seed || "song";
   const anim = WORD_ANIMS.includes(wordAnim) ? wordAnim : "off";
+  const lAnim = LETTER_ANIMS.includes(letterAnim) ? letterAnim : "off";
+  // Per-letter features need the word spans to exist, because the letters nest
+  // inside them. So they switch the render path on by themselves rather than
+  // requiring --word-anim as well.
+  const useSpans = anim !== "off" || lAnim !== "off" || Number(letterVar) > 0;
 
   // Random font size for this line. "phrase" scales the whole line once,
   // "word" varies each word (the div stays at fontSize and the words carry
   // relative sizes), anything else leaves the text exactly as it was.
-  // With --word-anim the words are spans anyway, so the size rides along on the
-  // same spans rather than through the older wordSpans() path.
+  // With spans in play the size rides along on the same spans rather than
+  // through the older wordSpans() path.
   const planSize = (text, index, cueTime, cueEnd) => {
     const amount = Number(sizeVar) || 0;
-    if (anim !== "off") {
+    if (useSpans) {
       return {
         size: fontSize,
         content: animatedWords(text, {
           seed: master, index, anim, sizeMode, sizeVar, t,
-          cueTime, cueEnd,
+          cueTime, cueEnd, letterAnim, letterSizeVar: letterVar,
         }),
       };
     }

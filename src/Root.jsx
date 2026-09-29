@@ -76,6 +76,11 @@ export const RemotionRoot = () => {
         // behaviour), otherwise each word is scheduled across the cue and
         // animates as it arrives. "reveal" | "karaoke" | "pulse".
         wordAnim: "off",
+        // Per-letter layer, nested inside each word span. letterAnim is
+        // fade|rise|pop|wipe; letterVar is per-letter SIZE, clamped to 0.12 in
+        // src/letters.js because the shirorekha is continuous across a word.
+        letterAnim: "off",
+        letterVar: 0,
         fps: 30,
         color: "#ffffff",
         // Soft dark halo keeps white text legible over a bright camera feed

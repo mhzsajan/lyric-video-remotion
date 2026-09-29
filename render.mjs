@@ -288,6 +288,19 @@ async function run(audioPath, lrcPath) {
     process.exit(1);
   }
   props.wordAnim = WORD_ANIM;
+  // Per-letter layer, nested inside each word span. Animation is safe at any
+  // strength; per-letter SIZE is clamped hard (0.12) because Devanagari's
+  // shirorekha runs continuously across a word and bigger steps snap it in two.
+  const LETTER_ANIM = flag("--letter-anim") || "off";
+  if (!["off", "fade", "rise", "pop", "wipe"].includes(LETTER_ANIM)) {
+    console.error('  Unknown --letter-anim "' + LETTER_ANIM + '". Use off, fade, rise, pop or wipe.');
+    process.exit(1);
+  }
+  props.letterAnim = LETTER_ANIM;
+  const letterVarRaw = Number(flag("--letter-var"));
+  props.letterVar = Number.isFinite(letterVarRaw)
+    ? Math.min(Math.max(letterVarRaw, 0), 0.03)
+    : 0;
   // mp4 has no alpha: paint the background black so Add/Screen blend keying
   // is exact. mov keeps a transparent background.
   props.background = FORMAT === "mov" ? "transparent" : "#000000";
@@ -399,6 +412,9 @@ if (BATCH) {
       "    --size-mode <m>  word (vary each word) | phrase | off   (default word)",
       "    --size-var <n>   how far sizes vary, 0..0.45 (default 0.15 = +-15%)",
       "    --word-anim <m>  off (default) | reveal | karaoke | pulse",
+      "    --letter-anim <m>  off (default) | fade | rise | pop | wipe",
+      "    --letter-var <n>   per-letter size, 0..0.03 (clamped hard: the",
+      "                      shirorekha is continuous across a word)",
       "    --color <#hex>   text colour",
       "    --seed <text>    animation seed (default: title from the .lrc)",
       "    --batch <dir>    render every audio+.lrc pair in a folder",
