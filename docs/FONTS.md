@@ -212,6 +212,15 @@ answering the only question that matters here —
 - **Tier B — 79 `GENERATED`** and **Tier C — 77 `PREETI`:** verified, but
   carry the five characters below.
 
+> **Looking for an engine-level fix — forking Remotion, or switching renderer?**
+> Don't; it cannot work. Remotion does not shape text, Chromium does, and these
+> fonts have **no Devanagari `cmap` and no GSUB/GPOS at all**. Every mainstream
+> stack is HarfBuzz over a strict `cmap`, so a different engine repeats the same
+> refusal. The fix belongs in the font, and a working proof of concept
+> exists — a `cmap` inverted from a layout made Chromium draw the font's own
+> Devanagari glyphs with no GSUB. Findings:
+> [`nepali-legacy-fonts/docs/UNICODE-REBUILD.md`](https://github.com/mhzsajan/nepali-legacy-fonts/blob/main/docs/UNICODE-REBUILD.md).
+
 ### Generating a layout for a font that has none
 
 Only reach for this if the font is not among the 79. [anepali.com](https://www.anepali.com)
