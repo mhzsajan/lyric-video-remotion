@@ -286,7 +286,7 @@ mistake. This is a property of the script — any typesetter that lets you size
 two letters of a Devanagari word differently breaks it the same way, which is
 why **size is per-word** and animation can safely be per-letter.
 
-> Gotcha #7 says size is per WORD, never per letter. That is still the rule —
+> Gotcha #8 says size is per WORD, never per letter. That is still the rule —
 > the letter layer can only reach 0.03, which is the measured point at which
 > the headline starts to look broken.
 
@@ -332,40 +332,58 @@ a grey rectangle over the camera feed. `scripts/reference_survey.py` checks
 4. **remotion.config.js must not pin codec/ProRes profile** — the composition
    declares defaults and render.mjs passes per-mode flags; pinning globally
    breaks `--codec=h264` previews with a conflict error.
-5. **`--preview` caps frames at last cue +2s** — otherwise it renders the
-   whole 417s timeline at 15fps, mostly silence.
-6. **Nepali `01 Fonts` (AMS/Ananda/Abhinav) are legacy ASCII-mapped fonts** —
+5. **The `--preview` length cap lives in `calculateMetadata`, not on the
+   command line.** It used to be `--frames=0-<lastCue+2s>`, computed from a
+   different number than the composition's own duration
+   (`max(audio, lastCue)`), so on any song whose audio is shorter than its
+   last cue plus 2s the range ran past the end and Remotion refused:
+   *"durationInFrames ... 6257, but frame range 0-6259"*. Allare is exactly
+   that case (417.0 s audio, 415.3 s last cue). One place now owns the
+   length, via the `preview` prop. **Never reintroduce a `--frames` range
+   for preview** — it will disagree again.
+6. **`--legacy-font` needs `npttf2utf` installed, and without it the failure
+   is a bare `FileNotFoundError` on `map.json`.** `scripts/layout_encoder.py`
+   loads its five layouts from that file. `pip install npttf2utf` is not
+   optional; every real render goes through it. Check with
+   `py -c "import npttf2utf"`.
+7. **Nepali `01 Fonts` (AMS/Ananda/Abhinav) are legacy ASCII-mapped fonts** —
    0 Devanagari codepoints, no GSUB/GPOS, so `--font "AMS Manthan"` alone does
    NOTHING: Chromium falls back per character. The working path is
-   `--legacy-font <file>`, which transcodes the lyrics to Preeti keys and
-   registers the .ttf through FontFace. Full survey, and the list of Unicode
-   fonts that need no transcoding at all, in **docs/FONTS.md**.
-7. **Random size is per WORD by default, never per letter.** Devanagari's
+   `--legacy-font <file>`, which transcodes the lyrics into the font's own key
+   layout and registers the .ttf through FontFace.
+   **Most of them do NOT speak Preeti.** Preeti keys fed to `ams.manthan.ttf`
+   render collapsed glyphs and a literal `==` where the danda should be. For a
+   font outside npttf2utf's five layouts, generate its map first — see
+   **docs/FONTS.md** and
+   [nepali-legacy-fonts](https://github.com/mhzsajan/nepali-legacy-fonts):
+   `py scripts/anepali_charmap.py <slug> --out layouts/<slug>.json`, then
+   pass `--layout-file layouts/<slug>.json`.
+8. **Random size is per WORD by default, never per letter.** Devanagari's
    shirorekha (the headline bar) is continuous inside a word — two letters at
    different sizes snap it in half. Word boundaries are already gaps, so they
    are safe. The `--letter-var` layer can only reach **0.03** for exactly this
    reason; see "Per-letter animation and size" above for the measured table.
-8. **Measuring the shirorekha by top-of-glyph is invalid.** Comparing the
+9. **Measuring the shirorekha by top-of-glyph is invalid.** Comparing the
    topmost lit row per column looks like it measures headline flatness, but
    Devanagari matras (`ि`, `ँ`, `ौ`) legitimately rise *above* the headline,
    so the metric reports "stepped" even at `--letter-var 0` where the bar is
    provably intact. It was used to produce a wrong conclusion here. Judge the
    headline by eye at 3× zoom, or measure a region with no matras.
-9. **`--hardware-acceleration` is ignored whenever `--crf` is set.** Remotion
+10. **`--hardware-acceleration` is ignored whenever `--crf` is set.** Remotion
    prints `"crf" option is not supported with hardware acceleration` and
    encodes in software. The flag was on every render here until this was
    found; it did nothing on any hardware. Removed. It is also NVENC-only, so
    it would not help on AMD regardless.
-10. **Remotion's bundled ffmpeg is not system ffmpeg** — no `rawvideo` muxer,
+11. **Remotion's bundled ffmpeg is not system ffmpeg** — no `rawvideo` muxer,
     no `signalstats`. Verification tricks against the bundled binary silently
     produce nothing. Use system ffmpeg to measure.
-11. **CSS `transform` is one property — the last write wins.** In roam mode the
+12. **CSS `transform` is one property — the last write wins.** In roam mode the
     entrance/exit animation (a `scale()` for glow) was applied to the same div
     carrying the position `translate(-50%,-50%)`, so the animation *replaced*
     the positioning and the block hung off the frame edge. Fixed by splitting
     them: outer div owns position, inner `inline-block` div owns the animation.
     Easy to reintroduce whenever a new style adds a transform.
-12. **A randomized position needs a safe band derived from block size, not
+13. **A randomized position needs a safe band derived from block size, not
     taste.** Roam centers a block on a seeded anchor with `maxWidth: 60vw`, so
     the anchor must sit within `[maxW/2, 100-maxW/2]` horizontally and
     `[maxH/2, 100-maxH/2]` vertically, or a full-width block clips. That is why
@@ -375,13 +393,13 @@ a grey rectangle over the camera feed. `scripts/reference_survey.py` checks
     100–145 px off the left edge, and a held two-line block pushed 1000+ px of
     glow through the top. Kali Kali had rendered "clean" purely because its seed
     got lucky.
-13. **Verify the finished video, not the stills you grabbed while building.**
+14. **Verify the finished video, not the stills you grabbed while building.**
     A latent edge-clip can survive every spot check. Scan the whole file for
     content in the outer rows/columns —
     `ffmpeg -i out/X.mp4 -vf "fps=1/6,cropdetect=limit=0.04" -f null -` finds
     every instance in seconds. Both songs rescanned 100 % clean after the
     anchor fix.
-14. **`gh repo create --source . --push` fails if the remote already exists**
+15. **`gh repo create --source . --push` fails if the remote already exists**
     (`GraphQL: Name already exists`). Check `git remote -v` first and just
     push. Transient `Failed to connect to github.com:443` also happens here —
     retry.

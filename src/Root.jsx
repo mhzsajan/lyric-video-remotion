@@ -48,8 +48,18 @@ export const RemotionRoot = () => {
         // the returned metadata then overrode the CLI --fps flag. Props arrive
         // at runtime and cannot go stale.
         const fps = Number(props.fps) || 30;
+        // A preview only needs to reach the last sung line. Rendered as a
+        // duration cap HERE rather than as a `--frames` range on the command
+        // line: the two disagreed, because this number is max(audio length,
+        // last cue) while --frames was last cue + a fixed 2s tail. Whenever the
+        // song is shorter than its own last cue plus the tail -- Allare, 417.0s
+        // audio against a 415.3s cue -- the range ran past the end and Remotion
+        // refused: "durationInFrames ... 6257, but frame range 0-6259". One
+        // place decides the length, so the two can never disagree.
+        const full = Math.max(seconds, tail);
+        const duration = props.preview ? Math.min(full, tail + 2) : full;
         return {
-          durationInFrames: Math.round(Math.max(seconds, tail) * fps),
+          durationInFrames: Math.round(duration * fps),
           fps,
           width: WIDTH,
           height: HEIGHT,
@@ -89,6 +99,9 @@ export const RemotionRoot = () => {
         letterAnim: "off",
         letterVar: 0,
         fps: 30,
+        // Preview caps the timeline at the last sung line + 2s. Resolved in
+        // calculateMetadata alongside the rest of the length maths.
+        preview: false,
         color: "#ffffff",
         // Soft dark halo keeps white text legible over a bright camera feed
         // without needing a background plate.

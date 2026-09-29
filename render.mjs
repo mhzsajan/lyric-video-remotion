@@ -62,6 +62,7 @@ const positional = argv.filter((a, i) => {
 const PREVIEW = has("--preview");
 const NO_AUDIO = has("--no-audio");
 const REPORT_ONLY = has("--report-only");
+const PREPARE_ONLY = has("--prepare-only");
 
 // mp4 (default): H.264, white text on BLACK background -- no alpha possible
 //   in mp4, so the consumer keys it with Add/Screen blend (Videosync2: set
@@ -78,6 +79,14 @@ if (!["mp4", "mov"].includes(FORMAT)) {
 // python + npttf2utf (see scripts/lrc_legacy.py). Pair with --font <family>.
 const LEGACY_FONT = flag("--legacy-font");
 const BATCH = flag("--batch");
+
+// Which key layout the legacy font speaks. npttf2utf knows five; a font
+// outside those needs a map generated from the publisher's character table
+// (scripts/anepali_charmap.py) and passed here with --layout-file. Preeti is
+// NOT a safe default for an arbitrary Nepali font: feeding Preeti keys to
+// AMS Manthan renders collapsed glyphs and literal `==` instead of the danda.
+const LEGACY_LAYOUT = flag("--layout") || "Preeti";
+const LEGACY_LAYOUT_FILE = flag("--layout-file") || null;
 
 const pad = (s, n) => String(s).padEnd(n);
 const rpad = (s, n) => String(s).padStart(n);
@@ -241,7 +250,8 @@ async function run(audioPath, lrcPath) {
       execFileSync(py.cmd, [
         path.join(HERE, "scripts", "lrc_legacy.py"),
         lrcPath, convOut,
-        "--layout", "Preeti",
+        "--layout", LEGACY_LAYOUT,
+        ...(LEGACY_LAYOUT_FILE ? ["--layout-file", LEGACY_LAYOUT_FILE] : []),
         "--font-family", family,
         "--font-file", path.basename(fontPath),
       ], { stdio: "inherit", cwd: HERE });
@@ -362,6 +372,19 @@ async function run(audioPath, lrcPath) {
 
   if (REPORT_ONLY) return;
 
+  // --prepare-only: do the encoding and font registration, then stop. Writes
+  // src/lyrics.generated.js and copies the .ttf into public/fonts/, so a
+  // single frame can then be rendered with `remotion still` -- which is how a
+  // new legacy font gets checked in seconds instead of after a full render.
+  // Nothing here is a shortcut around the render; it is the same code path
+  // up to the point where the render would begin.
+  if (PREPARE_ONLY) {
+    writeGenerated(renderLrc, "", legacy);
+    console.log("  prepared src/lyrics.generated.js" + (legacy ? " (+ " + legacy.file + ")" : ""));
+    console.log("  next: npx remotion still src/index.js LyricOverlay out/check.png --frame=5900 --props=out/props.json");
+    return;
+  }
+
   const style = flag("--style");
   if (style && !STYLES.includes(style)) {
     console.error('  Unknown style "' + style + '". Choose from: ' + STYLES.join(", "));
@@ -453,11 +476,29 @@ async function run(audioPath, lrcPath) {
   // mp4 has no alpha: paint the background black so Add/Screen blend keying
   // is exact. mov keeps a transparent background.
   props.background = FORMAT === "mov" ? "transparent" : "#000000";
+  // The preview length cap lives in calculateMetadata, next to the rest of
+  // the duration maths. It used to be a --frames range on the command line,
+  // computed from a different number, and the two disagreed (see Root.jsx).
+  props.preview = PREVIEW;
 
   // Format-specific codec flags. ProRes 4444 carries a real alpha channel
   // and must stay PNG-frame (JPEG has no alpha); H.264 cannot hold alpha, so
   // the mp4 is white-on-black for blend-mode keying and takes JPEG frames
   // (~15% faster measured) plus 30fps to match the proven Videosync2 source.
+  //
+  // GPU ENCODING (--gpu)
+  // ----------------------
+  // Remotion silently ignores --hardware-acceleration whenever --crf is set
+  // and prints "crf option is not supported with hardware acceleration", so
+  // crf and the NVENC encoder are mutually exclusive. The way to actually use
+  // an NVIDIA encoder is bitrate mode: --video-bitrate instead of --crf. At
+  // 1080p, 8M measures the same as the crf-17 preset this file used, so
+  // --gpu swaps quality knob for a real GPU encode and nothing else.
+  //
+  // Measured on this machine (RTX 5070): see docs/GPU.md. It is opt-in
+  // because a bitrate target and a CRF are different quality/size trades --
+  // if you want a predictable file size, keep crf.
+  const GPU = has("--gpu");
   const formatFlags = PREVIEW
     ? ["--scale=0.25", "--fps=15", "--codec=h264", "--crf=30"]
     : FORMAT === "mov"
@@ -466,30 +507,23 @@ async function run(audioPath, lrcPath) {
       // after metadata resolution and CLAMPS the frame count (a 30s
       // composition came out as 900 frames = 15s -- half the song). FPS
       // travels via props to calculateMetadata, which resolves it correctly.
-      //
-      // --hardware-acceleration is deliberately ABSENT. Remotion ignores it
-      // whenever --crf is set and says so out loud:
-      //   "Hardware accelerated encoding disabled - "crf" option is not
-      //    supported with hardware acceleration"
-      // (verified on this machine). It was passed here until that was found;
-      // it did nothing on any hardware. crf is the right knob because it
-      // gives a predictable file size, and hardware encoding is NVENC-only
-      // anyway -- it would not help on AMD at all. An NVIDIA machine that
-      // actually wants the GPU encoder must switch to bitrate mode, which is
-      // a different quality/size trade-off and is not enabled by default.
-      : ["--codec=h264", "--crf=17", "--pixel-format=yuv420p", "--image-format=jpeg"];
+      : GPU
+        ? ["--codec=h264", "--video-bitrate=8M", "--pixel-format=yuv420p",
+           "--image-format=jpeg", "--hardware-acceleration=nvenc"]
+        : ["--codec=h264", "--crf=17", "--pixel-format=yuv420p", "--image-format=jpeg"];
+
+  // GPU rasterisation for the headless Chromium that draws the frames is a
+  // Remotion CLI flag, not an env var, so it goes on the command line.
+  // `angle` is Remotion's default and uses the real GPU; `swiftshader` is the
+  // software rasteriser, kept as the escape hatch for machines where ANGLE
+  // fails to initialise.
+  const glFlag = GPU ? ["--gl=" + (flag("--gl") || "angle")] : [];
 
   const cliArgs = [
     "render", "src/index.js", "LyricOverlay", outPath,
     ...formatFlags,
+    ...glFlag,
     ...(NO_AUDIO ? ["--muted"] : []),
-    // Preview only needs to reach the last sung line: without this it renders
-    // the full composition -- at 15 fps that stretches 25k frames into a
-    // 27-minute timeline and mostly encodes silence. -1: frame INDEX max is
-    // duration-1 (0-5242 of a 5242-frame comp is an off-by-one error).
-    ...(PREVIEW && parsed.cues.length
-      ? ["--frames=0-" + (Math.round((parsed.cues[parsed.cues.length - 1].end + 2) * 15) - 1)]
-      : []),
     "--props=" + JSON.stringify(props),
   ];
 
@@ -501,7 +535,7 @@ async function run(audioPath, lrcPath) {
     "\n"
   );
 
-  // Only width/height/fps stay as env vars; they are plain numbers read with
+  // Only width/height stay as env vars; they are plain numbers read with
   // Number() and an unset one becomes NaN rather than a truthy string.
   const env = { ...process.env };
   if (flag("--font")) env.LYRIC_FONT = flag("--font");

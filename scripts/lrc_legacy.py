@@ -76,10 +76,25 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("src")
     ap.add_argument("dst")
-    ap.add_argument("--layout", default="Preeti", choices=LAYOUT_NAMES)
+    ap.add_argument("--layout", default="Preeti")
+    ap.add_argument("--layout-file", default=None,
+                    help="generated layout JSON (scripts/anepali_charmap.py) "
+                         "for a font outside npttf2utf's five")
     ap.add_argument("--font-family", default=None)
     ap.add_argument("--font-file", default=None)
     a = ap.parse_args()
+
+    if a.layout_file:
+        from layout_encoder import load_extra_layouts
+        merged = load_extra_layouts(a.layout_file)
+        if a.layout == "Preeti" and merged != "Preeti":
+            # A single generated layout file is almost always meant to be
+            # used; defaulting to Preeti alongside it would silently produce
+            # the exact wrong-glyph output this tool exists to prevent.
+            a.layout = merged
+    from layout_encoder import NAMES as AVAILABLE
+    if a.layout not in AVAILABLE:
+        ap.error(f"layout {a.layout!r} not available. Have: {', '.join(AVAILABLE)}")
 
     lines = open(a.src, encoding="utf-8-sig").read().splitlines()
     out = []

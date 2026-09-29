@@ -83,6 +83,52 @@ def _load():
 LAYOUTS = _load()
 NAMES = sorted(LAYOUTS.keys())
 
+
+def load_extra_layouts(path):
+    """Merge a generated layout file into LAYOUTS.
+
+    npttf2utf ships five Nepali layouts. A legacy font outside those five --
+    AMS Manthan among them, which produces collapsed glyphs and literal `==`
+    when fed Preeti keys -- has no map anywhere, so one is generated from the
+    font's published character table by scripts/anepali_charmap.py and merged
+    in here.
+
+    Round-trip verification needs npttf2utf's own decoder, which only knows its
+    five. A generated layout is therefore trusted on its own evidence: the
+    keys came from the publisher, the slot order was calibrated against
+    Preeti, and the caller is expected to have checked the keys against the
+    .ttf. `_decode` for such a layout falls back to the layout's own inverse
+    map, so a round-trip still proves the encoder is self-consistent -- it
+    cannot prove the published map is right, only that nothing was mangled in
+    transit.
+    """
+    import json as _json
+
+    with open(path, encoding="utf-8") as f:
+        data = _json.load(f)
+    for name, spec in data.items():
+        r = spec.get("rules", spec)
+        cmap = r.get("character-map", {})
+        inv = {}
+        for key, uni in sorted(cmap.items(), key=lambda kv: -len(kv[1])):
+            if uni not in inv:
+                inv[uni] = key
+        LAYOUTS[name] = {
+            "inv": inv,
+            "pre": [(p[0], p[1]) for p in r.get("pre-rules", [])],
+            "post": [(p[0], p[1]) for p in r.get("post-rules", [])],
+        }
+        if name not in NAMES:
+            NAMES.append(name)
+            NAMES.sort()
+        _SELF_DECODED.add(name)
+    return name
+
+
+# Layouts whose keys came from a generated map rather than npttf2utf. These
+# decode with their own inverse instead of the library.
+_SELF_DECODED = set()
+
 if FontMapper is not None:
     _FM = FontMapper(_MAP)
     _SUPPORTED = set(_FM.supported_maps)
@@ -92,7 +138,31 @@ else:
 
 
 def _decode(keys, layout):
-    """Decode key text -> unicode using the library (ground truth)."""
+    """Decode key text -> unicode.
+
+    npttf2utf's decoder is ground truth for its own five layouts. A generated
+    layout has no entry there, so it decodes with its own inverse map -- see
+    load_extra_layouts() for what that does and does not prove.
+    """
+    if layout in _SELF_DECODED:
+        inv = LAYOUTS[layout]["inv"]
+        fwd = {v: k for k, v in LAYOUTS[layout]["inv"].items()}
+        out = []
+        i = 0
+        while i < len(keys):
+            hit = None
+            for L in range(min(4, len(keys) - i), 0, -1):
+                frag = keys[i:i + L]
+                if frag in LAYOUTS[layout]["inv"]:
+                    hit = fwd[LAYOUTS[layout]["inv"][frag]]
+                    i += L
+                    break
+            if hit is None:
+                out.append(keys[i])
+                i += 1
+            else:
+                out.append(hit)
+        return "".join(out)
     if _FM is None:
         raise SystemExit("round-trip verification needs:  pip install npttf2utf")
     if layout not in _SUPPORTED:

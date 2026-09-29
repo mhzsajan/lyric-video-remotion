@@ -116,16 +116,65 @@ A bare CSS `font-family` is **not** enough for these: Chromium sandbox
 profiles will not reliably resolve them by name, which is what made
 `--font "AMS Manthan"` look broken when the real fault was upstream.
 
+### ⚠️ Preeti is NOT a safe default for these fonts
+
+The command above works **because Abhinav happens to be a Preeti font.** Most
+of the folder is not. Feeding Preeti keys to `ams.manthan.ttf` renders exactly
+what Track B is supposed to prevent: glyphs collapsed onto each other and a
+literal `==` where the danda should be. AMS Manthan is a Kantipur-style
+layout — `k` / `Ka` / `ga`, nothing like Preeti's `s` / `v` / `u`.
+
+`lrc_legacy.py` knows five layouts (Preeti, Sagarmatha, Kantipur, PCS NEPALI,
+FONTASY_HIMALI_TT). Which one any given font speaks is not recorded anywhere —
+the font cannot say, because it has no Unicode cmap and no GSUB, and reading
+the meaning off glyph outlines has already been shown to be unreliable.
+
+### Generating a layout for the rest
+
+[anepali.com](https://www.anepali.com) publishes a character table per font —
+each cell is a key, drawn in that font, under a Devanagari category heading —
+so a font's layout can be **read** rather than guessed. The tooling lives in
+[mhzsajan/nepali-legacy-fonts](https://github.com/mhzsajan/nepali-legacy-fonts)
+and is vendored into `scripts/`:
+
+```bash
+# 1. generate the font's own layout, validated against the real .ttf
+py scripts/anepali_charmap.py ams-manthan --font "path/to/ams.manthan.ttf" --out layouts/ams-manthan.json
+
+# 2. render with it
+node render.mjs <audio> <lrc> --legacy-font ams.manthan.ttf --layout-file layouts/ams-manthan.json
+```
+
+The slot order is calibrated off the Preeti page, where `npttf2utf` is ground
+truth, and the calibration is **asserted** (13/13 vowels, 36/36 consonants,
+10/10 numbers, 13/13 matras, all distinct) so a change to the site fails
+loudly instead of producing a plausible but wrong map.
+
+**Verified: AMS Manthan** now renders correctly. Verify any new font with one
+frame before shipping — `--prepare-only` then `remotion still` takes seconds
+rather than a full render:
+
+```bash
+node render.mjs <audio> <lrc> --legacy-font <f>.ttf --layout-file layouts/<f>.json --prepare-only
+npx remotion still src/index.js LyricOverlay out/check.png --frame=5900 --props=out/props.json
+```
+
 Notes:
 
 - **`Abhinav` is the proven one** — 35/35 lines round-tripped through
-  `npttf2utf`, rendered and eyeballed at 1080p.
-- `lrc_legacy.py`'s layouts are `Preeti`, `Sagarmatha`, `Kantipur`,
-  `PCS NEPALI`, `FONTASY_HIMALI_TT`. Which layout the *other* fonts speak has
-  **not** been established — confirm before assuming `--layout Preeti`.
+  `npttf2utf`, rendered and eyeballed at 1080p. `ams.manthan` is the second,
+  via a generated map.
+- **`npttf2utf` must be installed.** `layout_encoder.py` loads its five
+  layouts from the package's `map.json`; without it `--legacy-font` dies with
+  a bare `FileNotFoundError` on that path.
 - `npttf2utf`'s Preeti map has no key for `फ`; `lrc_legacy.py` patches it with
   `km` (`KEY_FIXES`). Loud `!! not round-trip exact` on stderr means a word
   needs a manual fix — do not ship it silently.
+- **Symbols are deliberately not mapped.** aNepali publishes them, but the
+  same slots hold different characters on different pages, and a legacy font
+  already keeps its Devanagari punctuation on the ASCII codepoints, so
+  punctuation passes through the transcoder untouched. Mapping it twice is
+  what produced the literal `==`.
 
 ---
 
