@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, Audio, staticFile, useCurrentFrame, useVideoConfig, delayRender, continueRender } from "remotion";
 import { styleFor, jitterFor, positionFor, sizeFor } from "./animations.js";
+import { wordTimings } from "./word-timing.js";
 import { AUDIO_FILE, LEGACY_FONT_FILE, LEGACY_FONT_FAMILY } from "./lyrics.generated.js";
 
 // Legacy Preeti-era fonts (AMS/Ananda/Abhinav): load the actual .ttf through
@@ -69,6 +70,116 @@ const easeIn = (t) => Math.pow(clamp01(t), 3);
 const ENTER = 0.34; // seconds
 const EXIT = 0.28;
 
+// -- word-by-word animation (--word-anim) ------------------------------------
+//
+// Each word gets its own start time (src/word-timing.js) and animates in when
+// it arrives, so a line is built on screen word by word instead of appearing
+// all at once. Words already sung STAY visible -- the line is not wiped after
+// the fact, because the audience needs to read the whole line while the next
+// one is already coming in.
+//
+// The per-word style is picked from the same seeded pool as line styles, keyed
+// on (seed, cueIndex, wordIndex), so it is deterministic like everything else
+// here. The word index is part of the key so words in one line do not all get
+// the same animation.
+function wordStyleFor(seedText, cueIndex, wordIndex, force) {
+  return styleFor(`${seedText}#${cueIndex}`, wordIndex, force);
+}
+
+export const WORD_ANIMS = ["off", "reveal", "karaoke", "pulse"];
+
+/**
+ * Visual state of one word at time t.
+ *
+ * @param {string} mode   off | reveal | karaoke | pulse
+ * @param {number} start  when this word begins
+ * @param {number} end    when the next word begins (== cue end for the last)
+ * @param {number} t      current time in seconds
+ * @param {object} st     line-level style, reused so the word matches the line
+ */
+export function wordState(mode, start, end, t, st) {
+  if (mode === "off" || !st) return { opacity: 1, transform: "" };
+
+  // st carries the line's shadow/filter, which each word should keep; only the
+  // animated properties are overridden below.
+  const p = clamp01((t - start) / Math.max(0.05, end - start));
+
+  if (mode === "reveal") {
+    // Rise into place quickly, then hold for the rest of the slot.
+    const inE = easeOut(clamp01((t - start) / 0.22));
+    return { ...st, opacity: inE, transform: `translateY(${(1 - inE) * 14}px)` };
+  }
+
+  if (mode === "karaoke") {
+    // Brightest at the moment it lands, settling back after: this is what makes
+    // the eye follow along the line.
+    const inE = easeOut(clamp01((t - start) / 0.18));
+    const hot = 1 - p;
+    return {
+      ...st,
+      opacity: inE,
+      textShadow: `0 0 ${(10 + hot * 26).toFixed(1)}px rgba(255,255,255,${(0.35 + hot * 0.6).toFixed(2)})`,
+    };
+  }
+
+  if (mode === "pulse") {
+    // A small scale pop as the word lands, nothing after.
+    const inE = easeOut(clamp01((t - start) / 0.2));
+    return {
+      ...st,
+      opacity: inE,
+      transform: `scale(${(0.9 + 0.1 * inE).toFixed(4)})`,
+    };
+  }
+
+  return { ...st, opacity: 1, transform: "" };
+}
+
+/**
+ * Render a cue's words as spans, each animated on its own start time.
+ *
+ * The line-level style `st` is deliberately NOT applied to the words: it holds
+ * the whole-line entrance/exit and a `scale()` in it would fight the per-word
+ * transform. The caller keeps it on the wrapping element.
+ */
+function animatedWords(text, opts) {
+  const { seed, index, anim, sizeMode, sizeVar, t, cueTime, cueEnd } = opts;
+  const words = wordTimings({ text, time: cueTime, end: cueEnd });
+  if (words.length === 0) return text;
+
+  const amount = Number(sizeVar) || 0;
+
+  return words.map((w, i) => {
+    const ws = wordState(
+      anim,
+      w.start,
+      w.end,
+      t,
+      anim === "off" ? null : cueStyle(wordStyleFor(seed, index, i), 1, 0, 0)
+    );
+    const pct =
+      sizeMode === "word"
+        ? (sizeFor(seed, index, amount, "w" + i) * 100).toFixed(2) + "%"
+        : null;
+    return (
+      <React.Fragment key={i}>
+        {i > 0 ? " " : null}
+        <span
+          style={{
+            // inline-block so a scale() has its own box to act on; on a plain
+            // inline span the transform would apply to the whole line.
+            display: "inline-block",
+            ...(pct ? { fontSize: pct } : {}),
+            ...ws,
+          }}
+        >
+          {w.text}
+        </span>
+      </React.Fragment>
+    );
+  });
+}
+
 /**
  * Compute the visual state of one cue at time t.
  * Exported so the still/contact-sheet renderer can reuse it without React.
@@ -123,17 +234,29 @@ export function cueStyle(style, p, q, j) {
   return s;
 }
 
-export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, position, background, mode, sizeMode, sizeVar }) => {
+export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, position, background, mode, sizeMode, sizeVar, wordAnim }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = frame / fps;
   const master = seed || "song";
+  const anim = WORD_ANIMS.includes(wordAnim) ? wordAnim : "off";
 
   // Random font size for this line. "phrase" scales the whole line once,
   // "word" varies each word (the div stays at fontSize and the words carry
   // relative sizes), anything else leaves the text exactly as it was.
-  const planSize = (text, index) => {
+  // With --word-anim the words are spans anyway, so the size rides along on the
+  // same spans rather than through the older wordSpans() path.
+  const planSize = (text, index, cueTime, cueEnd) => {
     const amount = Number(sizeVar) || 0;
+    if (anim !== "off") {
+      return {
+        size: fontSize,
+        content: animatedWords(text, {
+          seed: master, index, anim, sizeMode, sizeVar, t,
+          cueTime, cueEnd,
+        }),
+      };
+    }
     if (sizeMode === "phrase") {
       return { size: fontSize * sizeFor(master, index, amount), content: text };
     }
@@ -196,8 +319,12 @@ export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, posit
   const prevLife = prevSpan > 0 ? clamp01(prevAge / prevSpan) : 1;
 
   // Size plan, resolved once for both the current line and the outgoing one.
-  const cur = planSize(cue.text, cue.index);
-  const pv = prev ? planSize(prev.text, prev.index) : null;
+  // Cue times travel in because word-by-word animation schedules each word
+  // across [cueTime, cueEnd].
+  const cur = planSize(cue.text, cue.index, cue.time, cue.end);
+  const pv = prev
+    ? planSize(prev.text, prev.index, prev.time, prev.end)
+    : null;
 
   const textStyle = {
     fontFamily: FONT_FAMILY,

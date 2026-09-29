@@ -72,6 +72,10 @@ export const RemotionRoot = () => {
         // deviation from 1.0, clamped to 0.45 in render.mjs.
         sizeMode: "word",
         sizeVar: 0.15,
+        // Word-by-word animation: "off" animates whole lines (previous
+        // behaviour), otherwise each word is scheduled across the cue and
+        // animates as it arrives. "reveal" | "karaoke" | "pulse".
+        wordAnim: "off",
         fps: 30,
         color: "#ffffff",
         // Soft dark halo keeps white text legible over a bright camera feed

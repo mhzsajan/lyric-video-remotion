@@ -278,6 +278,16 @@ async function run(audioPath, lrcPath) {
   props.sizeVar = Number.isFinite(sizeVarRaw)
     ? Math.min(Math.max(sizeVarRaw, 0), 0.45)
     : 0.15;
+  // Word-by-word animation. Each word is scheduled across the cue's span by
+  // character count (src/word-timing.js) and animates as it arrives, while
+  // still keeping the line's own entrance/exit. "off" keeps whole-line
+  // animation, which is the previous behaviour.
+  const WORD_ANIM = flag("--word-anim") || "off";
+  if (!["off", "reveal", "karaoke", "pulse"].includes(WORD_ANIM)) {
+    console.error('  Unknown --word-anim "' + WORD_ANIM + '". Use off, reveal, karaoke or pulse.');
+    process.exit(1);
+  }
+  props.wordAnim = WORD_ANIM;
   // mp4 has no alpha: paint the background black so Add/Screen blend keying
   // is exact. mov keeps a transparent background.
   props.background = FORMAT === "mov" ? "transparent" : "#000000";
@@ -388,6 +398,7 @@ if (BATCH) {
       "    --size <px>      font size (default 104)",
       "    --size-mode <m>  word (vary each word) | phrase | off   (default word)",
       "    --size-var <n>   how far sizes vary, 0..0.45 (default 0.15 = +-15%)",
+      "    --word-anim <m>  off (default) | reveal | karaoke | pulse",
       "    --color <#hex>   text colour",
       "    --seed <text>    animation seed (default: title from the .lrc)",
       "    --batch <dir>    render every audio+.lrc pair in a folder",
