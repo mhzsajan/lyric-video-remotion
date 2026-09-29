@@ -67,6 +67,7 @@ Ableton and the video can never disagree.
 | `--size <px>` | Font size, default `104`. |
 | `--size-mode <m>` | Random size per `word` (default) or per `phrase`, or `off`. |
 | `--size-var <n>` | How far those sizes vary, `0`..`0.45` (default `0.15`). |
+| `--word-anim <m>` | `off` (default), `reveal`, `karaoke` or `pulse` — animate word by word. |
 | `--color <#hex>` | Text colour, default `#ffffff`. |
 | `--seed <text>` | Animation seed, default the `[ti:]` title. |
 | `--out <file>` | Explicit output path. |
@@ -81,6 +82,13 @@ Animations: `fade`, `rise`, `pop`, `slide-left`, `slide-right`, `typewriter`,
 `(seed, cueIndex)`, so re-rendering the same song produces a byte-identical
 result. That matters live: you render once, and the video must keep matching
 your show file. Change the look by changing `--seed`, not by re-rendering.
+
+**Word-by-word animation.** `--word-anim karaoke` builds each line on screen
+word by word, with the newest word brightest. The `.lrc` is untouched — word
+times are derived at render time by dividing each cue's span among its words in
+proportion to character count, so the file AbleSet and Ableton read stays
+exactly as Song Timer wrote it. Modes: `reveal`, `karaoke`, `pulse`, or `off`
+for the default whole-line animation.
 
 **Always preview first.** The one ProRes render measured end to end — Allare,
 417 s at 1080p60 — came out at **3.2 GB** and took minutes to encode, roughly

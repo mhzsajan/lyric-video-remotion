@@ -117,6 +117,44 @@ python scripts/reference_survey.py <video>            # one file
 python scripts/reference_survey.py <reference> <ours> # A/B + suggested --size
 ```
 
+## Word-by-word animation
+
+```bash
+--word-anim off        # whole-line animation, the old behaviour (default)
+--word-anim reveal     # each word rises into place as it arrives
+--word-anim karaoke    # newest word is brightest, settling back after
+--word-anim pulse      # small scale pop as each word lands
+```
+
+Each word of a cue is scheduled across that cue's `[time, end)` span and
+animates as it arrives. Already-sung words **stay visible** — the audience has
+to be able to read the line while the next one is coming in.
+
+**The `.lrc` is not touched.** It is a contract shared with AbleSet and Ableton
+and carries one timestamp per line. Word times are derived at render time in
+`src/word-timing.js`, which divides a cue's span among its words in proportion
+to sung character count (trailing punctuation excluded, so `नगर,` does not
+outlast `नगर`).
+
+This is an approximation: it assumes a line is sung evenly, so individual words
+will not land exactly on the sung syllable. It needs no new input and no
+dependencies, and it reads correctly.
+
+**The seam for beat sync** is `wordTimings(cue, { anchors })` — pass absolute
+times and words snap to them, out-of-order anchors clamped forward so words
+can never render backwards. Beat detection is meant to plug in here without
+touching anything else in the renderer.
+
+| File | What |
+|---|---|
+| `src/word-timing.js` | `wordTimings()` / `splitWords()` / `wordWeight()` — pure, no React |
+| `src/LyricOverlay.jsx` | `wordState()` per mode, `animatedWords()` renders the spans |
+| `scripts/check_word_timing.mjs` | asserts ordering, bounds, reassembly, anchors |
+
+`node scripts/check_word_timing.mjs [lrc]` runs those assertions against a real
+song's cues (109/109 for Allare). It exists because a word popping out of order
+mid-render is painful to spot by eye in a four-minute video.
+
 ## Gotchas that cost us time (do not rediscover these)
 
 1. **process.env in components is statically replaced at build time.** An
