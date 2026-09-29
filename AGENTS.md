@@ -403,16 +403,53 @@ a grey rectangle over the camera feed. `scripts/reference_survey.py` checks
     Measured: Kali Kali is 6:49.1 of audio, its last lyric ends at 5:47.5, and
     the render stopped at 5:49.5 — the overlay ended while the song was still
     playing. Pass `--length <seconds>` for every `--no-audio` render.
-15. **Verify the finished video, not the stills you grabbed while building.**
+15. **A render that finishes is not a render that is correct — verify the
+    file, not the exit code.** `--mode roam` dropped the `<Audio>` element
+    entirely: the component's early return for roam had no `<Audio>`, only the
+    centre path did. So *every* roam render came out **silent** while exiting
+    0, printing `OK`, at the right length, the right size, with a
+    plausible-looking picture. Nothing in the output says "no audio", and
+    `--mode roam` is the recommended style, so this was the default path.
+
+    Caught only by looking at the stream list:
+
+    ```
+    ffprobe -v error -show_entries stream=codec_type -of csv=p=0 out/x.mp4
+    roam   -> 0,h264,video
+    centre -> 0,h264,video
+              1,aac,audio
+    ```
+
+    `scripts/check_output.py` does that plus the length and the black-plate
+    check, and fails loudly:
+
+    ```bash
+    py scripts/check_output.py out/"<song>.mp4"
+    py scripts/check_output.py --no-audio --audio-seconds 409.13 out/"<song>.mp4"
+    ```
+
+    It needs `pillow` for the background-purity sample. Run it before
+    delivering anything. **Any new early return in a component has to carry
+    every side element the other paths carry** — an `<Audio>`, a `<Sequence>`,
+    a provider. That is the shape of this bug.
+16. **Verify the finished video, not the stills you grabbed while building.**
     A latent edge-clip can survive every spot check. Scan the whole file for
     content in the outer rows/columns —
     `ffmpeg -i out/X.mp4 -vf "fps=1/6,cropdetect=limit=0.04" -f null -` finds
     every instance in seconds. Both songs rescanned 100 % clean after the
     anchor fix.
-16. **`gh repo create --source . --push` fails if the remote already exists**
+17. **`gh repo create --source . --push` fails if the remote already exists**
     (`GraphQL: Name already exists`). Check `git remote -v` first and just
     push. Transient `Failed to connect to github.com:443` also happens here —
     retry.
+
+## The shape of the roam audio bug, in one line
+
+A component with **two** return paths will eventually have a side element in
+only one of them, and the path that misses it is whichever one a later style
+flag selects. `--mode roam` is the recommended style, so the broken path was
+also the default one. When you add a branch here, diff it against the others
+for anything that is not a style: `<Audio>`, a provider, a `<Sequence>`.
 
 ## Measuring video: traps that produce confidently wrong numbers
 

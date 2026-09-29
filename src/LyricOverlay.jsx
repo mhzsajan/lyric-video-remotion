@@ -466,6 +466,15 @@ export const LyricOverlay = ({ cues, title, band, seed, style, fontSize, color, 
     const prevPos = prev ? layout(prev.index) : null;
     return (
       <AbsoluteFill style={frameStyle}>
+        {/* The song, so the finished file syncs against its own audio with no
+            external reference. This has to be in BOTH return paths: it was
+            only in the centre one, so every --mode roam render came out
+            silent while still reporting success. Silent and the right length
+            is an easy mistake to ship — nothing in the output says "no audio".
+            Verified with ffprobe: roam gave one stream (video), centre gave
+            two. */}
+        {AUDIO_FILE ? <Audio src={staticFile(AUDIO_FILE)} /> : null}
+
         {prev && prevLife < 1 ? (
           <div
             style={{

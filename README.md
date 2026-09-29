@@ -103,6 +103,19 @@ node render.mjs song.mp3 song.lrc --no-audio --length 409.13 --font "Nirmala UI"
 
 Output lands in `out/<song name>.mp4` (or `.mov` with `--format mov`).
 
+**Then verify it.** A render that finishes is not a render that is correct —
+every failure below exits 0 and prints `OK`:
+
+```bash
+py scripts/check_output.py out/"<song>.mp4"          # audio + length + black plate
+py scripts/check_output.py --no-audio --audio-seconds 409.13 out/"<song>.mp4"
+```
+
+It checks the stream list, that the file is as long as the audio rather than
+as long as the lyrics, and that the background is pure `#000000` — which is
+what makes the Add/Screen blend key cleanly. It needs `pillow` for the last
+one.
+
 **Check a font before trusting it.** `--prepare-only` then one `still` frame
 costs seconds and is the only step that catches a wrong font — a bad layout
 does not error, it renders the wrong letters.

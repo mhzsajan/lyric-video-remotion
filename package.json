@@ -9,7 +9,9 @@
     "render": "node render.mjs",
     "preview": "node render.mjs --preview",
     "report": "node render.mjs --report-only",
-    "batch": "node render.mjs --batch"
+    "prepare": "node render.mjs --prepare-only",
+    "batch": "node render.mjs --batch",
+    "check": "python scripts/check_output.py"
   },
   "dependencies": {
     "@remotion/cli": "4.0.529",
