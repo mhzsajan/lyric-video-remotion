@@ -26,15 +26,18 @@ Run everything from the repo root on Windows. Source media lives in
 | Needed for | Must have | Notes |
 |---|---|---|
 | Any render | Node 16+ (tested on 24.18) | `Intl.Segmenter` needs 16+; there is a fallback, but don't rely on it |
-| **`--legacy-font`, i.e. every real render** | **`python` on PATH** | `render.mjs` shells out to `scripts/lrc_legacy.py` with **no fallback** — no Python, hard crash |
+| **`--legacy-font`, i.e. every real render** | **Python 3 on PATH** | `render.mjs` transcodes via `scripts/lrc_legacy.py`. It probes `python`, then `py`, then `python3`, and if none work it stops with an explanation instead of crashing |
 | The measurement/verification scripts | `ffmpeg` + `ffprobe` on PATH, `pillow`, `fonttools` | Not needed to *render* — Remotion bundles its own ffmpeg |
 | Font survey | `fonttools` | `python scripts/font_survey.py <folder>` |
 
 Verified working: Node v24.18.0, Python 3.14.6, fontTools 4.65.0, Pillow 12.3.0.
 
-> On Windows the command called is literally `python`. If your machine only has
-> the `py` launcher, `render.mjs` will fail with ENOENT — use `python` or add a
-> shim.
+> The transcoder is Python and there is no JS equivalent, by choice: it is a
+> generate-and-verify encoder (several candidate orderings, each round-trip
+> decoded and compared) that is already proven word-by-word. Porting it would
+> put ~250 untested lines on the path that produces the deliverable.
+> `pythonCommand()` in `render.mjs` probes for an interpreter and degrades with
+> a readable message rather than a raw ENOENT.
 
 ## Making a new song — the whole procedure
 

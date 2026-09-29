@@ -101,6 +101,31 @@ function legacyFamilyGuess(file) {
     : "AMS " + name;
 }
 
+// Find a working Python interpreter, or null if there is none.
+//
+// The transcoder (scripts/lrc_legacy.py) is Python and is not optional for
+// --legacy-font. Probing for the interpreter up front turns a confusing ENOENT
+// thrown from deep inside execFileSync into a plain sentence about Python.
+//
+// `py` is checked too: on Windows a common install has the launcher but no
+// `python` shim on PATH, and this is the single most likely reason a correct
+// machine still fails here.
+function pythonCommand() {
+  const candidates =
+    process.platform === "win32"
+      ? [["python", ["-c", "pass"]], ["py", ["-c", "pass"]], ["python3", ["-c", "pass"]]]
+      : [["python3", ["-c", "pass"]], ["python", ["-c", "pass"]]];
+  for (const [cmd, args] of candidates) {
+    try {
+      execFileSync(cmd, args, { stdio: "ignore", windowsHide: true });
+      return { cmd };
+    } catch {
+      // not this one; try the next
+    }
+  }
+  return null;
+}
+
 function resolveLegacyFont(fileOrPath, lrcPath) {
   // Accept an absolute path, a path relative to the song folder (where the
   // 01 Fonts collection lives one level up), or a bare file name there.
@@ -186,13 +211,53 @@ async function run(audioPath, lrcPath) {
     const convOut = path.join(HERE, "out", "_legacy-" + path.basename(lrcPath));
     fs.mkdirSync(path.dirname(convOut), { recursive: true });
     console.log("  legacy font : " + path.basename(fontPath) + " (" + family + ")");
-    execFileSync("python", [
-      path.join(HERE, "scripts", "lrc_legacy.py"),
-      lrcPath, convOut,
-      "--layout", "Preeti",
-      "--font-family", family,
-      "--font-file", path.basename(fontPath),
-    ], { stdio: "inherit", cwd: HERE });
+
+    // Preflight: the transcoder is Python, and without it the Nepali text
+    // cannot be encoded at all. Check BEFORE doing any work so the failure is
+    // a sentence about Python rather than a raw ENOENT stack trace. The command
+    // is literally "python" -- a Windows box that only has the "py" launcher
+    // fails here too, so the hint mentions both.
+    const py = pythonCommand();
+    if (!py) {
+      console.error("");
+      console.error("  --legacy-font needs Python, and it was not found on PATH.");
+      console.error("");
+      console.error("  These 1990s-era Nepali fonts map ASCII keys, not Unicode, so the");
+      console.error("  lyrics must be transcoded before Chromium can render them. That is");
+      console.error("  what scripts/lrc_legacy.py does.");
+      console.error("");
+      console.error("  Fix:  install Python 3, and make sure one of `python`, `py` or");
+      console.error("        `python3` runs in this shell (all three are tried, in that");
+      console.error("        order, so the `py` launcher alone is fine).");
+      console.error("  Check with:  python --version   (or  py --version)");
+      console.error("");
+      console.error("  To render without it, drop --legacy-font and use a Unicode Devanagari");
+      console.error("  font instead -- see docs/FONTS.md for 9 that need no conversion.");
+      console.error("");
+      process.exit(1);
+    }
+
+    try {
+      execFileSync(py.cmd, [
+        path.join(HERE, "scripts", "lrc_legacy.py"),
+        lrcPath, convOut,
+        "--layout", "Preeti",
+        "--font-family", family,
+        "--font-file", path.basename(fontPath),
+      ], { stdio: "inherit", cwd: HERE });
+    } catch (err) {
+      // Surface the real cause. lrc_legacy.py prints "not round-trip exact"
+      // warnings to stderr and exits non-zero if it cannot finish, and those
+      // warnings are the actual diagnostic -- do not swallow them behind a
+      // generic message.
+      console.error("");
+      console.error("  scripts/lrc_legacy.py failed (exit " + (err.status ?? "?") + ").");
+      console.error("  Any 'not round-trip exact' lines above name the word that failed");
+      console.error("  to encode cleanly -- the font may not be Preeti-layout.");
+      console.error("  See docs/FONTS.md for which fonts are Preeti and which are not.");
+      console.error("");
+      process.exit(1);
+    }
     // Strip audit/metadata lines: the component gets font info via the
     // generated module, not the LRC text.
     renderLrc = fs

@@ -21,10 +21,10 @@ with `--no-audio` you get a pure text-only render with no audio track at all.
 ## Requirements
 
 - **Node 16+** (tested on 24.18).
-- **Python on `PATH`** — required by `--legacy-font`, which every real render
-  uses. `render.mjs` shells out to `scripts/lrc_legacy.py` with no fallback, so
-  without Python it hard-crashes. The command it runs is literally `python`, so
-  a machine that only has the `py` launcher will fail with ENOENT.
+- **Python 3 on `PATH`** — required by `--legacy-font`, which every real render
+  uses. `render.mjs` transcodes the lyrics with `scripts/lrc_legacy.py`; it
+  looks for `python`, then `py`, then `python3`, and if none are present it
+  stops with an explanation rather than crashing.
 - `ffmpeg`/`ffprobe`, `pillow` and `fonttools` are only needed for the
   verification scripts in `scripts/`, **not** to render — Remotion bundles its
   own ffmpeg.
