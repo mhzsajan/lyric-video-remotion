@@ -357,8 +357,34 @@ a grey rectangle over the camera feed. `scripts/reference_survey.py` checks
    found; it did nothing on any hardware. Removed. It is also NVENC-only, so
    it would not help on AMD regardless.
 10. **Remotion's bundled ffmpeg is not system ffmpeg** — no `rawvideo` muxer,
-   no `signalstats`. Verification tricks against the bundled binary silently
-   produce nothing. Use system ffmpeg to measure.
+    no `signalstats`. Verification tricks against the bundled binary silently
+    produce nothing. Use system ffmpeg to measure.
+11. **CSS `transform` is one property — the last write wins.** In roam mode the
+    entrance/exit animation (a `scale()` for glow) was applied to the same div
+    carrying the position `translate(-50%,-50%)`, so the animation *replaced*
+    the positioning and the block hung off the frame edge. Fixed by splitting
+    them: outer div owns position, inner `inline-block` div owns the animation.
+    Easy to reintroduce whenever a new style adds a transform.
+12. **A randomized position needs a safe band derived from block size, not
+    taste.** Roam centers a block on a seeded anchor with `maxWidth: 60vw`, so
+    the anchor must sit within `[maxW/2, 100-maxW/2]` horizontally and
+    `[maxH/2, 100-maxH/2]` vertically, or a full-width block clips. That is why
+    the bands are **x 32–68 %, y 24–66 %** (`positionFor`). The first range
+    (x 12–52 %, y 8–66 %) was chosen by eyeballing the reference and shipped a
+    latent bug that only showed on one song: Ritu's long chorus lines lost
+    100–145 px off the left edge, and a held two-line block pushed 1000+ px of
+    glow through the top. Kali Kali had rendered "clean" purely because its seed
+    got lucky.
+13. **Verify the finished video, not the stills you grabbed while building.**
+    A latent edge-clip can survive every spot check. Scan the whole file for
+    content in the outer rows/columns —
+    `ffmpeg -i out/X.mp4 -vf "fps=1/6,cropdetect=limit=0.04" -f null -` finds
+    every instance in seconds. Both songs rescanned 100 % clean after the
+    anchor fix.
+14. **`gh repo create --source . --push` fails if the remote already exists**
+    (`GraphQL: Name already exists`). Check `git remote -v` first and just
+    push. Transient `Failed to connect to github.com:443` also happens here —
+    retry.
 
 ## Measuring video: traps that produce confidently wrong numbers
 
