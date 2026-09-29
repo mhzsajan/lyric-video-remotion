@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 /*
  * render.mjs -- one command from "song.mp3 + lyrics.lrc" to a transparent
  * lyric overlay you can drop onto a Videosync2 layer.
@@ -78,7 +78,23 @@ if (!["mp4", "mov"].includes(FORMAT)) {
 // converting the Unicode lyrics to that font's key sequences first. Needs
 // python + npttf2utf (see scripts/lrc_legacy.py). Pair with --font <family>.
 const LEGACY_FONT = flag("--legacy-font");
+const FONT_FILE_ARG = flag("--font-file");
 const BATCH = flag("--batch");
+
+// These are opposite operations, so asking for both is a mistake worth naming
+// rather than a precedence question. Checked at the top of run(), before
+// either font is resolved: the legacy path fails first on a bad file and would
+// otherwise report "font not found" for a request that was never going to work.
+function refuseBothFonts() {
+  console.error(
+    "  --font-file and --legacy-font are two different things and cannot be\n" +
+      "  combined. --font-file uses the font as-is; --legacy-font converts the\n" +
+      "  lyrics to that font's key sequences first. A Unicode face needs no\n" +
+      "  layout and has no risk of wrong letters, which is usually the one you\n" +
+      "  want: see the Font section of the README."
+  );
+  process.exitCode = 1;
+}
 
 // Which key layout the legacy font speaks. npttf2utf knows five; a font
 // outside those needs a map generated from the publisher's character table
@@ -152,7 +168,104 @@ function pythonCommand() {
   }
   return null;
 }
+/**
+ * The width table for the font this render will use.
+ *
+ * WHAT THIS IS
+ * ------------
+ * The auto-fit has to know how wide a cue will be before it renders, or the
+ * text is sized for a wrap that does not happen and the delivered video is
+ * quietly 25-30% smaller than it needs to be. Three cheaper answers were tried
+ * first and all three were wrong in ways that looked right:
+ *
+ *   0.55em per code point     a Preeti font is ~0.48em per code point, so every
+ *                             legacy line was predicted to wrap when it does
+ *                             not, and got shrunk for nothing
+ *   mean of the font's        0.7153em for Nirmala UI. A pre-base matra is
+ *     hmtx advances           reordered by the shaper into space its consonant
+ *     (fontTools)             already owns, so the real cost is ~0.33em per
+ *                             code point. This predicted three lines for a line
+ *                             the browser draws on one
+ *   mean over consonants      0.7480em, still averaging narrow spaces in with
+ *     only                    wide consonants
+ *
+ * So the numbers are MEASURED, by rendering sample lines in the same browser
+ * that will render the video and measuring the ink they leave. See
+ * scripts/calibrate_width.mjs. The result is cached in scripts/width.json,
+ * keyed by font and by whether a song's own lines were used in the fit.
+ *
+ * WHY THE SONG MATTERS
+ * --------------------
+ * A fit on synthetic micro-samples described the real Allare line to 0.6% and a
+ * plain four-consonant run to 36% -- right for the one line that mattered and
+ * wrong for the shape of most others, because short samples carry a full side
+ * bearing. So `scripts/calibrate_width.mjs --lrc <song>` adds twelve of the
+ * song's own lines and fits on those, and reports leave-one-out error. On
+ * Allare that is 2.4% on the lines that wrap, with the browser agreeing about
+ * whether every line wraps.
+ *
+ * Returns null when there is no table, and the component then falls back to its
+ * per-class defaults. Said out loud rather than silently, because a silent
+ * fallback is how the original 0.55 shipped.
+ */
+function widthTableFor(fontFamily, lrcPath) {
+  const cachePath = path.join(HERE, "scripts", "width.json");
+  let cache = {};
+  try {
+    cache = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+  } catch {
+    return { table: null, note: "scripts/width.json is missing" };
+  }
+  // The overlay's CSS stack, in the order it is asked. Whichever of these is
+  // installed FIRST is the face that will actually be drawn, so that is the one
+  // the calibration has to be for. With no --font and no --font-file the stack
+  // starts at "Noto Sans Devanagari", and looking that up first rather than
+  // defaulting straight to Nirmala is the difference between measuring the right
+  // face and confidently measuring the wrong one.
+  //
+  // A named family is used ALONE, never as a hint to search the stack. A
+  // --font-file face is registered under its own name and is the one that will
+  // be drawn, so falling back to "Nirmala UI +song" -- which existed in the
+  // cache -- would measure a different font and fit the wrong widths for it.
+  // A wrong-but-close number is the failure mode this whole table exists to
+  // remove, so a miss is reported rather than papered over.
+  const stack = fontFamily
+    ? [fontFamily]
+    : ["Noto Sans Devanagari", "Nirmala UI", "Microsoft New Tai Lue", "Segoe UI"];
 
+  const candidates = [];
+  for (const fam of stack) {
+    // A fit on this song's own lines is preferred over a per-font one: it
+    // describes the distribution the model is actually used on.
+    candidates.push(fam + " +song", fam);
+  }
+  for (const k of candidates) {
+    if (cache[k]) {
+      return {
+        table: cache[k],
+        key: k,
+        song: k.endsWith(" +song"),
+        family: k.replace(" +song", ""),
+      };
+    }
+  }
+  const anyKey = Object.keys(cache)[0];
+  if (anyKey) {
+    return {
+      table: null,
+      note:
+        "no entry for " + stack.join(" / ") + "; the closest is " + anyKey +
+        ". Run: node scripts/calibrate_width.mjs --font \"" + stack[0] +
+        "\" --lrc <song.lrc>",
+    };
+  }
+  return {
+    table: null,
+    note:
+      "scripts/width.json is empty. Run: node scripts/calibrate_width.mjs " +
+      "--font \"" + stack[0] + "\" --lrc <song.lrc>",
+  };
+}
 function resolveLegacyFont(fileOrPath, lrcPath) {
   // Accept an absolute path, a path relative to the song folder (where the
   // 01 Fonts collection lives one level up), or a bare file name there.
@@ -172,7 +285,34 @@ function resolveLegacyFont(fileOrPath, lrcPath) {
  * @param seconds explicit duration. See AUDIO_SECONDS below for why a
  *   --no-audio render has to carry one.
  */
-function writeGenerated(lrcText, audioFile, legacy = null, seconds = 0) {
+/**
+ * Read a .ttf's family name, so --font-file does not have to be told.
+ *
+ * The name is taken from the font rather than from --font because the two
+ * disagree more often than not -- "Yantramanav" in the file, "Yantra Manav" in
+ * a README, "Halant" in one place and "Halant New" in another -- and a mismatch
+ * does not error. The CSS family simply does not resolve, the browser falls
+ * through to the system font, and the render looks like the flag was ignored.
+ */
+function readFontFamily(file) {
+  const py = pythonCommand();
+  if (!py) return null;
+  const script = path.join(HERE, "scripts", "font_family.py");
+  if (!fs.existsSync(script)) return null;
+  try {
+    const out = execFileSync(py.cmd, [script, file], {
+      encoding: "utf8",
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const name = String(out).trim();
+    return name && name.length < 80 ? name : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeGenerated(lrcText, audioFile, legacy = null, seconds = 0, fontFile = null, fontFamilyName = null) {
   const esc = (s) =>
     s.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
   const body =
@@ -183,6 +323,12 @@ function writeGenerated(lrcText, audioFile, legacy = null, seconds = 0) {
     "// register via FontFace and the .ttf file name inside public/fonts/.\n" +
     "export const LEGACY_FONT_FILE = " + JSON.stringify(legacy ? legacy.file : "") + ";\n" +
     "export const LEGACY_FONT_FAMILY = " + JSON.stringify(legacy ? legacy.family : "") + ";\n" +
+    "\n// Non-empty for --font-file: a local .ttf registered under a name of our\n" +
+    "// choosing, with the lyrics UNCHANGED. This is how a distinctive\n" +
+    "// Devanagari face is used without a key layout, and therefore without the\n" +
+    "// risk of one. See the FONT_FILE block in LyricOverlay.jsx.\n" +
+    "export const FONT_FILE = " + JSON.stringify(fontFile || "") + ";\n" +
+    "export const FONT_FAMILY_NAME = " + JSON.stringify(fontFamilyName || "") + ";\n" +
     "\n// Explicit duration in seconds, when render.mjs could not let the\n" +
     "// composition probe the audio. See AUDIO_SECONDS in render.mjs.\n" +
     "export const AUDIO_SECONDS = " + (Number(seconds) || 0) + ";\n";
@@ -230,6 +376,10 @@ function report(cues, title) {
 
 // -- one render ------------------------------------------------------------
 async function run(audioPath, lrcPath) {
+  if (LEGACY_FONT && FONT_FILE_ARG) {
+    refuseBothFonts();
+    return;
+  }
   const title = path.basename(audioPath).replace(/\.[^.]+$/, "");
   rule(title);
 
@@ -303,6 +453,48 @@ async function run(audioPath, lrcPath) {
     fs.mkdirSync(path.join(PUBLIC, "fonts"), { recursive: true });
     fs.copyFileSync(fontPath, path.join(PUBLIC, "fonts", path.basename(fontPath)));
     legacy = { family, file: path.basename(fontPath) };
+  }
+
+  // --font-file: a local .ttf used AS IS, with the lyrics unchanged.
+  //
+  // This is how a distinctive Devanagari face gets used without a key layout,
+  // and therefore without the risk of one. It is NOT a legacy font: nothing is
+  // transcoded, so there is no layout that can render the wrong letters, and
+  // there is no round-trip to come out wrong. The 58 Unicode Devanagari fonts
+  // in nepali-legacy-fonts -- many of them display faces -- are all reachable
+  // this way.
+  //
+  // It has to be a separate flag rather than a variant of --legacy-font,
+  // because --legacy-font also implies "convert the text to Preeti keys", and
+  // running that on a Unicode font produces keys the font has no glyphs for:
+  // silently, and with a video that looks fine.
+  let fontFile = null;
+  let fontFamilyName = null;
+  // FONT_FILE_ARG was validated against --legacy-font at the top of this file,
+  // before either was resolved, so the `if (legacy)` check that used to be here
+  // is gone: it could only fire after the legacy path had already succeeded.
+  if (FONT_FILE_ARG) {
+    const found = [FONT_FILE_ARG, path.join(path.dirname(lrcPath), FONT_FILE_ARG),
+      path.join(path.dirname(lrcPath), "..", "01 Fonts", FONT_FILE_ARG),
+    ].find((p) => fs.existsSync(p));
+    if (!found) {
+      console.error("  Font file not found: " + FONT_FILE_ARG);
+      console.error("  Looked in: " + FONT_FILE_ARG + ", beside the .lrc, and ../01 Fonts");
+      process.exitCode = 1;
+      return;
+    }
+    // The family name is read out of the font itself rather than taken from
+    // --font, because the two disagree more often than not ("Yantramanav" in
+    // the file, "Yantra Manav" in a README) and a mismatch means the CSS
+    // silently falls through to the system font.
+    const familyName =
+      flag("--font") || readFontFamily(found) || path.basename(found, ".ttf");
+    fontFile = path.basename(found);
+    fontFamilyName = familyName;
+    fs.mkdirSync(path.join(PUBLIC, "fonts"), { recursive: true });
+    fs.copyFileSync(found, path.join(PUBLIC, "fonts", fontFile));
+    console.log("  font file : " + found);
+    console.log("  family    : " + JSON.stringify(familyName) + "  (from the font, not a flag)");
   }
 
   // Imported dynamically so the exact same parser the component uses is the
@@ -453,20 +645,44 @@ async function run(audioPath, lrcPath) {
     return;
   }
 
-  if (REPORT_ONLY) return;
-
-  // --prepare-only: do the encoding and font registration, then stop. Writes
-  // src/lyrics.generated.js and copies the .ttf into public/fonts/, so a
-  // single frame can then be rendered with `remotion still` -- which is how a
-  // new legacy font gets checked in seconds instead of after a full render.
-  // Nothing here is a shortcut around the render; it is the same code path
-  // up to the point where the render would begin.
-  if (PREPARE_ONLY) {
-    writeGenerated(renderLrc, "", legacy);
-    console.log("  prepared src/lyrics.generated.js" + (legacy ? " (+ " + legacy.file + ")" : ""));
-    console.log("  next: npx remotion still src/index.js LyricOverlay out/check.png --frame=5900 --props=out/props.json");
+  const MODES = ["center", "roam", "horizontal", "vertical", "mix"];
+  const MODE = flag("--mode") || "";
+  if (MODE && !MODES.includes(MODE)) {
+    console.error('  Unknown --mode "' + MODE + '". Use ' + MODES.join(", ") + ".");
+    process.exitCode = 1;
     return;
   }
+
+  // The mix options are validated HERE, before --report-only returns, so a bad
+  // --mix-block is caught on the cheap dry run rather than after the encoding
+  // step. Nothing here touches `props` or `seed`: both are declared further
+  // down, and reading them from up here is a temporal dead zone error. The
+  // values are carried in MIX and copied over where they exist.
+  let MIX = null;
+  if (MODE === "mix") {
+    const block = Number(flag("--mix-block")) || 8;
+    if (block < 4) {
+      // Not a clamp-without-telling: a presentation every four cues is already
+      // at the edge of readable, and one cue per presentation is a flicker.
+      console.error(
+        "  --mix-block " + block + " is too small. The minimum is 4 cues per " +
+          "presentation, because at Allare's median 1.4s a cue, anything less " +
+          "is a flicker rather than variety."
+      );
+      process.exitCode = 1;
+      return;
+    }
+    MIX = { block, spec: flag("--mix-plan") || "" };
+  }
+  if (REPORT_ONLY) return;
+
+  // --prepare-only is handled further down, once the props exist. It has to be
+  // down there: it prints a `remotion still` command that passes
+  // --props=out/props.json, and the only way to honour that is to actually
+  // write that file. It used to return here and then suggest a props file
+  // nothing had ever written, so following the hint rendered a still with
+  // DEFAULT props -- wrong font size, wrong position, no word animation -- and
+  // it looked plausible, which is the whole problem with a font check.
 
   const style = flag("--style");
   if (style && !STYLES.includes(style)) {
@@ -492,10 +708,10 @@ async function run(audioPath, lrcPath) {
     );
   }
   if (NO_AUDIO) {
-    writeGenerated(renderLrc, "", legacy, explicitSeconds);
+    writeGenerated(renderLrc, "", legacy, explicitSeconds, fontFile, fontFamilyName);
   } else {
     const audioName = copyAudio(audioPath);
-    writeGenerated(renderLrc, "/" + path.basename(audioName), legacy, explicitSeconds);
+    writeGenerated(renderLrc, "/" + path.basename(audioName), legacy, explicitSeconds, fontFile, fontFamilyName);
   }
 
   const outDir = path.join(HERE, "out");
@@ -536,13 +752,64 @@ async function run(audioPath, lrcPath) {
   //   horizontal one left-aligned band, lines stack down -- the karaoke look,
   //              where the eye follows one line instead of chasing a word that
   //              moves every line. Pair it with --word-anim karaoke.
-  const MODE = flag("--mode") || "";
-  if (MODE && !["center", "roam", "horizontal"].includes(MODE)) {
-    console.error('  Unknown --mode "' + MODE + '". Use center, roam or horizontal.');
-    process.exitCode = 1;
-    return;
-  }
+  //   vertical   one centred narrow column, lines stack down
+  //   mix        all of the above, planned across the song (--mix-block,
+  //              --mix-plan). A presentation is a placement AND a unit, word
+  //              or phrase, so --word-anim applies to the word blocks only.
+  //
+  // MODE was validated and MIX resolved before --report-only returned, so the
+  // plan can be printed on the dry run. The values are copied into props HERE
+  // because props does not exist up there.
   if (MODE) props.mode = MODE;
+  if (MIX) {
+    props.mixBlock = MIX.block;
+    if (MIX.spec) props.mixPlanSpec = MIX.spec;
+  }
+
+  if (MODE === "mix") {
+    // Print the plan. A mixed video cannot be debugged from the picture: "it
+    // looked wrong at 2:40" points at nothing unless the log says what was on
+    // screen at 2:40.
+    //
+    // A bad --mix-plan is caught here rather than allowed to throw.
+    // parsePlan raises on an unknown presentation or a malformed chunk, and an
+    // unhandled throw out of a CLI is a stack trace pointing at a source line,
+    // which tells the person who typed the command nothing about what to type
+    // instead.
+    //
+    // The import is outside the try because PRESENTATION_IDS is used in the
+    // catch: a const declared inside the try is in its temporal dead zone in
+    // the catch, so the error handler would itself throw a ReferenceError --
+    // and it would do so while reporting some *other* error, which is how a
+    // real "Cannot access 'seed' before initialization" ended up printed
+    // underneath a paragraph about presentation names.
+    const { buildMixPlan, describePlan, PRESENTATION_IDS } =
+      await import("./src/mix.js");
+    try {
+      const plan = buildMixPlan({
+        seed,
+        cueCount: parsed.cues.length,
+        block: MIX.block,
+        spec: MIX.spec,
+      });
+      console.log(
+        "  mix plan (" + plan.length + " cues, " +
+          new Set(plan.map((p) => p.id)).size + " presentations):"
+      );
+      for (const line of describePlan(plan)) console.log("    " + line);
+    } catch (err) {
+      console.error("  " + (err && err.message ? err.message : String(err)));
+      // Only nudge about the syntax when the error really is about the plan,
+      // so a genuine bug is not buried under advice that does not apply.
+      if (MIX.spec) {
+        console.error("  The eight presentations are: " + PRESENTATION_IDS.join(", "));
+        console.error("  A chunk looks like  0-7:h-word  or  16+:*  (0-based cue indices).");
+      }
+      process.exitCode = 1;
+      return;
+    }
+  }
+
   // Random font size. "word" varies each word of a line, "phrase" scales the
   // whole line once, "off" disables it. --size-var is the max deviation from
   // 1.0 (0.15 = 85%..115%) and is clamped: past 0.45 the small words stop
@@ -587,6 +854,82 @@ async function run(audioPath, lrcPath) {
   // the duration maths. It used to be a --frames range on the command line,
   // computed from a different number, and the two disagreed (see Root.jsx).
   props.preview = PREVIEW;
+
+  // The font's measured width coefficients, so the auto-fit counts wrapped
+  // lines from a measurement instead of a guess. See widthTableFor() for the
+  // three guesses this replaced and why each was wrong.
+  //
+  // A legacy font is keyed by the family it registers under, not by the file,
+  // because the calibration is of the face the browser will use.
+  const widthInfo = widthTableFor(
+    legacy ? legacy.family : fontFamilyName || flag("--font"),
+    lrcPath
+  );
+  if (widthInfo.table) {
+    props.widthModel = widthInfo.table;
+    // A legacy font uses the per-code-point model, a Unicode font the
+    // per-class one. Printing the per-class names for a per-char table showed
+    // a row of dashes and looked like the font had no coefficients at all.
+    const t = widthInfo.table;
+    const c = typeof t.perChar === "number"
+      ? "per code point " + t.perChar.toFixed(4) + " em  (legacy key font)"
+      : ["cons", "matra", "space", "other"]
+          .map((k) => k + " " + (t[k] == null ? "-" : t[k]))
+          .join("  ");
+    console.log(
+      "  font      : " + (legacy ? legacy.family : flag("--font") || "(default stack)") +
+        "   " + (widthInfo.song ? "fitted on this song's lines" : "per-font only") +
+        "\n              width em: " + c +
+        "\n              leave-one-out error " +
+        (t.worstError * 100).toFixed(1) + "%" +
+        (t.calibratedOn ? ", measured on " + t.calibratedOn : "")
+    );
+  } else {
+    // Said out loud, and with the command to fix it, because the fallback is
+    // exactly the thing that made the delivered render too small -- and a
+    // silent 0.55 is how it shipped in the first place.
+    console.warn(
+      "  note: no width table for this font (" + widthInfo.note + ")\n" +
+        "        The auto-fit falls back to per-class defaults, which are the old\n" +
+        "        0.55em constant written out. Text may be smaller than it needs to\n" +
+        "        be, or a long line may run off the bottom of the frame."
+    );
+  }
+
+  // --prepare-only: do the encoding and font registration, write the props the
+  // still command needs, then stop. This is how a new legacy font gets checked
+  // in seconds instead of after a four-minute render.
+  //
+  // Nothing here is a shortcut around the render: it is the same code path up
+  // to the point where the render would begin. The audio is deliberately NOT
+  // copied in, because a still frame has no audio and copying it would leave a
+  // 6 MB file in public/ for nothing.
+  if (PREPARE_ONLY) {
+    writeGenerated(renderLrc, "", legacy, 0, fontFile, fontFamilyName);
+    const propsPath = path.join(outDir, "props.json");
+    fs.writeFileSync(propsPath, JSON.stringify(props, null, 2), "utf8");
+    console.log("  prepared src/lyrics.generated.js" + (legacy ? " (+ " + legacy.file + ")" : ""));
+    console.log("  wrote " + path.relative(HERE, propsPath));
+    // The frame is the middle of the LONGEST cue, not a fixed number: that is
+    // the frame most likely to wrap, clip or fall back to a different typeface,
+    // so it is the one worth looking at. A hard-coded 5900 happened to land on
+    // a short line for every song tried, which made the check look like it had
+    // passed.
+    let worst = parsed.cues[0];
+    for (const c of parsed.cues) {
+      if (!worst || c.text.length > worst.text.length) worst = c;
+    }
+    const mid = Math.round(
+      ((worst ? worst.time + (worst.end - worst.time) / 2 : 0) || 0) * fps
+    );
+    console.log(
+      "  next: npx remotion still src/index.js LyricOverlay out/check.png " +
+        "--frame=" + mid + " --props=" + path.relative(HERE, propsPath) +
+        "\n        (longest cue: " + (worst ? worst.text.length : 0) +
+        " characters at " + (worst ? worst.time.toFixed(2) : 0) + "s)"
+    );
+    return;
+  }
 
   // Format-specific codec flags. ProRes 4444 carries a real alpha channel
   // and must stay PNG-frame (JPEG has no alpha); H.264 cannot hold alpha, so
@@ -709,8 +1052,23 @@ if (BATCH) {
       "    --preview        fast, small, no alpha -- check timing first",
       "    --no-audio       leave the audio track out of the output",
       "    --font <family>  font family to render with",
+      "    --font-file <f> use a local .ttf AS IS -- no key layout, no\n" +
+        "                     conversion, so no risk of wrong letters. The family\n" +
+        "                     name is read from the font, not from a flag. This\n" +
+        "                     is how a distinctive Unicode Devanagari face is\n" +
+        "                     used; --legacy-font is the opposite and cannot be\n" +
+        "                     combined with it.",
       "    --mode <mode>    center (default) | roam (random spot per line) |\n" +
-    "                     horizontal (one left-aligned band; pair with karaoke)",
+        "                     horizontal (one left-aligned band; pair with karaoke) |\n" +
+        "                     vertical (one centred narrow column) |\n" +
+        "                     mix (all of them, planned across the song)\n" +
+        "    --mix-block <n>  cues per presentation in mix mode (default 8, min 4).\n" +
+        "                     Below 4 it is a flicker, not variety: Allare's\n" +
+        "                     median cue is 1.4s.\n" +
+        "    --mix-plan <s>   pin a verse: \"0-7:h-word,8-15:v-phrase,16+:*\"\n" +
+        "                     0-based cue indices. The eight presentations are\n" +
+        "                     h-word h-phrase v-word v-phrase c-word c-phrase\n" +
+        "                     r-word r-phrase; \"*\" hands back to the automatic walk.",
       "    --format <fmt>   mp4 (h264 black bg, default) | mov (prores alpha)",
       "    --legacy-font <f> use a Preeti-era font (.ttf), converting the lyrics\n                     to its key layout (needs python + npttf2utf);",
       "    --fps <n>        output frame rate (default: 30 mp4 / 60 mov)",

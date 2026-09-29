@@ -2,6 +2,7 @@ node_modules/
 out/
 public/
 src/lyrics.generated.js
+src/calib-samples.generated.js
 demo/
 *.log
 .DS_Store

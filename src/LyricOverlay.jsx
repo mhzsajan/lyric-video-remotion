@@ -1,18 +1,60 @@
 import React from "react";
 import { AbsoluteFill, Audio, staticFile, useCurrentFrame, useVideoConfig, delayRender, continueRender } from "remotion";
 import { styleFor, jitterFor, positionFor, sizeFor } from "./animations.js";
+import { buildMixPlan } from "./mix.js";
+import { widthEm } from "./width-model.mjs";
 import { wordTimings } from "./word-timing.js";
 import { splitGraphemes, letterSizePct } from "./letters.js";
 import { TitleCard } from "./TitleCard.jsx";
-import { AUDIO_FILE, LEGACY_FONT_FILE, LEGACY_FONT_FAMILY } from "./lyrics.generated.js";
+import { AUDIO_FILE, LEGACY_FONT_FILE, LEGACY_FONT_FAMILY, FONT_FILE, FONT_FAMILY_NAME } from "./lyrics.generated.js";
 
-// Legacy Preeti-era fonts (AMS/Ananda/Abhinav): load the actual .ttf through
-// the FontFace API -- a bare CSS font-family cannot name these fonts reliably
-// across Chromium sandbox profiles, but explicit bytes always register. The
-// FILE is copied into public/fonts by render.mjs; text arrives pre-converted
-// to Preeti key sequences (scripts/lrc_legacy.py), which these fonts map to
-// their real Devanagari glyphs.
+// Two ways a font gets here, and the difference between them is the whole
+// point of this file.
+//
+//   FONT_FILE       a local .ttf registered under a name we choose. Used for
+//                   BOTH kinds of font, because the CSS font-family stack
+//                   cannot name a font that is not installed, and a font file
+//                   on disk is not installed.
+//   LEGACY_FONT_FILE the same thing, but the lyrics have already been
+//                   transcoded to Preeti key sequences, so this is a font whose
+//                   text is NOT the Devanagari in the .lrc.
+//
+// FONT_FILE is the interesting one: it is how a distinctive Devanagari face is
+// used WITHOUT a layout file. The "custom font" look does not require a legacy
+// font -- it requires a typeface that is not the system default. There are 58
+// Unicode Devanagari fonts in nepali-legacy-fonts, many of them display faces,
+// and a Unicode font is handed the lyrics unchanged, so there is no key layout
+// that can render the wrong letters. A legacy font is the only thing that
+// carries that risk, and it is the only thing that needs transcoding.
+if (FONT_FILE) {
+  const handle = delayRender(`font: ${FONT_FAMILY_NAME}`);
+  const face = new FontFace(
+    FONT_FAMILY_NAME,
+    `url('${staticFile("fonts/" + FONT_FILE)}') format('truetype')`,
+    {}
+  );
+  face
+    .load()
+    .then((loaded) => {
+      document.fonts.add(loaded);
+      continueRender(handle);
+    })
+    .catch((err) => {
+      // A font that will not load renders the fallback, which is a valid-looking
+      // video in the wrong typeface. Say so: the frame is otherwise fine and
+      // nothing else reports it.
+      console.error(`Font failed to load: ${FONT_FAMILY_NAME} (${FONT_FILE})`, err);
+      continueRender(handle);
+    });
+}
+
 if (LEGACY_FONT_FILE) {
+  // Legacy Preeti-era fonts (AMS/Ananda/Abhinav): load the actual .ttf through
+  // the FontFace API -- a bare CSS font-family cannot name these fonts reliably
+  // across Chromium sandbox profiles, but explicit bytes always register. The
+  // FILE is copied into public/fonts by render.mjs; text arrives pre-converted
+  // to Preeti key sequences (scripts/lrc_legacy.py), which these fonts map to
+  // their real Devanagari glyphs.
   const handle = delayRender(`legacy font: ${LEGACY_FONT_FAMILY}`);
   const face = new FontFace(
     LEGACY_FONT_FAMILY,
@@ -33,8 +75,12 @@ if (LEGACY_FONT_FILE) {
 
 const FONT_FAMILY =
   LEGACY_FONT_FAMILY ||
-  process.env.LYRIC_FONT ||
-  '"Noto Sans Devanagari", "Nirmala UI", "Microsoft New Tai Lue", "Segoe UI", sans-serif';
+  // A --font-file is registered under FONT_FAMILY_NAME and must lead the stack,
+  // or the CSS fallback below wins and the render quietly uses the system font
+  // instead -- which looks like the flag was ignored rather than like an error.
+  (FONT_FILE ? '"' + FONT_FAMILY_NAME + '", ' : "") +
+  (process.env.LYRIC_FONT ||
+    '"Noto Sans Devanagari", "Nirmala UI", "Microsoft New Tai Lue", "Segoe UI", sans-serif');
 
 // Legacy Preeti text is visual-order ASCII: applying fontWeight 700 makes
 // Chromium synthesize fake bold (double-draw smear), and letter-spacing
@@ -327,42 +373,13 @@ export function cueStyle(style, p, q, j) {
   return s;
 }
 
-export const LyricOverlay = ({ cues, title, band, seed, style, fontSize, color, shadow, position, background, mode, sizeMode, sizeVar, wordAnim, letterAnim, letterVar, titleCard, titleCardOutro }) => {
+export const LyricOverlay = ({ cues, title, band, seed, style, fontSize, color, shadow, position, background, mode, sizeMode, sizeVar, wordAnim, letterAnim, letterVar, titleCard, titleCardOutro, mixBlock, mixPlanSpec, widthModel }) => {
   const frame = useCurrentFrame();
   const { fps, width: W_FRAME, height: H_FRAME } = useVideoConfig();
   const t = frame / fps;
   const master = seed || "song";
   const anim = WORD_ANIMS.includes(wordAnim) ? wordAnim : "off";
   const lAnim = LETTER_ANIMS.includes(letterAnim) ? letterAnim : "off";
-  // Per-letter features need the word spans to exist, because the letters nest
-  // inside them. So they switch the render path on by themselves rather than
-  // requiring --word-anim as well.
-  const useSpans = anim !== "off" || lAnim !== "off" || Number(letterVar) > 0;
-
-  // Random font size for this line. "phrase" scales the whole line once,
-  // "word" varies each word (the div stays at fontSize and the words carry
-  // relative sizes), anything else leaves the text exactly as it was.
-  // With spans in play the size rides along on the same spans rather than
-  // through the older wordSpans() path.
-  const planSize = (text, index, cueTime, cueEnd) => {
-    const amount = Number(sizeVar) || 0;
-    if (useSpans) {
-      return {
-        size: fontSize,
-        content: animatedWords(text, {
-          seed: master, index, anim, sizeMode, sizeVar, t,
-          cueTime, cueEnd, letterAnim, letterSizeVar: letterVar,
-        }),
-      };
-    }
-    if (sizeMode === "phrase") {
-      return { size: fontSize * sizeFor(master, index, amount), content: text };
-    }
-    if (sizeMode === "word") {
-      return { size: fontSize, content: wordSpans(text, master, index, amount) };
-    }
-    return { size: fontSize, content: text };
-  };
 
   // Active cue = the last one that has started.
   let idx = -1;
@@ -371,267 +388,332 @@ export const LyricOverlay = ({ cues, title, band, seed, style, fontSize, color, 
     else break;
   }
 
-  const align = {
-    top: { justifyContent: "flex-start", paddingTop: "8vh" },
-    center: { justifyContent: "center" },
-    bottom: { justifyContent: "flex-end", paddingBottom: "9vh" },
-  }[position || "center"];
-
-  // --mode: how a line is PLACED on the frame. This is independent of
-  // --word-anim / --letter-anim, which control how a line is ANIMATED once it
-  // is placed.
-  //
-  //   center     (default) lines stack in the middle, the outgoing one drifts up
-  //   roam       each line gets its own seeded spot (the reference-video look)
-  //   horizontal one left-aligned band, lines stack downward — the karaoke /
-  //              subtitle look, where the eye follows a single line of text
-  //              rather than chasing a word appearing in five different places
-  //
-  // Horizontal exists because roam fights word-by-word animation. In roam each
-  // line lands somewhere new, so a karaoke sweep has the audience re-finding
-  // the text on every line; with the text pinned to one band the sweep reads
-  // as a single continuous left-to-right progression, which is the whole point
-  // of it. The two are compatible but not equally legible.
-  const roam = mode === "roam";
-  const horizontal = mode === "horizontal";
-  const layout = (cueIndex) => {
-    if (!roam) return null;
-    const p = positionFor(seed || "song", cueIndex);
-    return {
-      position: "absolute",
-      left: p.x + "%",
-      top: p.y + "%",
-      transform: "translate(-50%, -50%)",
-    };
-  };
-
-  // Horizontal band geometry.
-  //
-  // The band is anchored to a COLUMN, not a row: every line starts at the same
-  // left edge and wraps downward. `width` is what forces the wrap, and it has
-  // to be bounded for the same reason roam's anchor is — a full-width line
-  // would run off the right edge. 64vw leaves a real margin at 1920 and still
-  // fits a long line without breaking after two words.
-  //
-  // These are NUMBERS, not "64vw". The auto-fit below does arithmetic on the
-  // width to work out how many lines a cue will wrap to, and "64vw" * 19.2 is
-  // NaN — every comparison against NaN is false, so the fit silently did
-  // nothing and the clipped line stayed clipped. The unit is added at the
-  // point of use.
-  //
-  // The vertical values put the band in the LOWER half by default. This is
-  // lyrics over a camera feed, so the text must clear a performer's head and
-  // shoulders, which occupy the middle of frame. `center` = 56% is not the
-  // middle of the frame and is not meant to be: the band TOP is at 56%, so a
-  // single line sits around 56-70% and a wrapped one 56-80%, both in the
-  // lower third where subtitle convention puts them.
-  const H_BAND = {
-    left: 11,
-    width: 64,
-    top: { top: 24, center: 56, bottom: 70 }[position || "center"],
-  };
-
-  const frameStyle = {
-    // "transparent" = alpha overlay (mov / ProRes 4444). A colour like
-    // "#000000" = keyable plate for containers without alpha (mp4): the
-    // consumer sets the layer blend to Add/Screen so black disappears.
-    backgroundColor: background || "transparent",
-    alignItems: "center",
-    padding: "0 8vw",
-    ...align,
-  };
-
-  // The opening and closing cards. They sit UNDER the lyrics in the tree: the
-  // card never shares the screen with text, so z-order is a non-issue, and
-  // keeping it in one wrapper means both return paths below (roam and centre)
-  // get it without duplicating the call.
-  const opener = (titleCard || titleCardOutro) ? (
-    <TitleCard
-      t={t}
-      firstLyric={cues.length ? cues[0].time : NaN}
-      lastLyricEnd={cues.length ? cues[cues.length - 1].end : NaN}
-      title={title}
-      band={band}
-      color={color}
-      anyway={!!titleCard && titleCard !== "no"}
-      outro={!!titleCardOutro}
-    />
-  ) : null;
-
-  if (idx < 0) return <AbsoluteFill style={frameStyle}>{opener}</AbsoluteFill>;
-
-  const cue = cues[idx];
-  const since = t - cue.time;
-  const until = cue.end - t;
-  const picked = styleFor(seed || "song", idx, style);
-  const st = cueStyle(picked, since / ENTER, until / EXIT, jitterFor(seed || "song", idx));
-
-  // The line just before, drifting away — reads as motion rather than a hard cut.
+  // The line just before, drifting away — reads as motion rather than a hard
+  // cut. Its own presentation is resolved separately below, which is what turns
+  // a change of placement into a cross-fade between two layouts instead of the
+  // text jumping.
   const prev = idx > 0 ? cues[idx - 1] : null;
   const prevAge = prev ? t - prev.time : 0;
   const prevSpan = prev ? prev.end - prev.time : 0;
   const prevLife = prevSpan > 0 ? clamp01(prevAge / prevSpan) : 1;
 
-  // Size plan, resolved once for both the current line and the outgoing one.
-  // Cue times travel in because word-by-word animation schedules each word
-  // across [cueTime, cueEnd].
-  const cur = planSize(cue.text, cue.index, cue.time, cue.end);
-  const pv = prev
-    ? planSize(prev.text, prev.index, prev.time, prev.end)
+  const roam = mode === "roam";
+  const horizontal = mode === "horizontal";
+  const vertical = mode === "vertical";
+
+// ---------------------------------------------------------------------------
+// PLACEMENT
+// ---------------------------------------------------------------------------
+//
+// --mode is how a line is PLACED on the frame. It is independent of
+// --word-anim / --letter-anim, which control how a line is ANIMATED once placed.
+//
+//   center     (default) lines stack in the middle, the outgoing one drifts up
+//   roam       each line gets its own seeded spot (the reference-video look)
+//   horizontal one left-aligned band, lines stack downward
+//   vertical   one centred narrow column, lines stack downward
+//   mix        all of the above, planned across the song (see src/mix.js)
+//
+// Horizontal exists because roam fights word-by-word animation: in roam each
+// line lands somewhere new, so a karaoke sweep makes the audience re-find the
+// text every line. Pinned to one band it reads as one continuous left-to-right
+// progression. Vertical is the same argument for short lyrics, where a 64vw
+// band wastes the frame and a narrow column reads better.
+//
+// ONE RETURN PATH
+// ---------------
+// This used to be three, and the third one to be added was vertical -- at
+// which point every future path was a chance to leave something out of one of
+// them. That already happened once: `<Audio>` was only in the centre path, so
+// every `--mode roam` render came out silent while still exiting 0. Silent and
+// the right length is easy to ship, because nothing in the output says "no
+// audio". So there is ONE return path now and placement is a per-cue property.
+// If you add a placement, add it to geometry() -- there is nowhere else it can
+// go wrong.
+const MODE_DEFAULT_UNIT = "word";
+
+/**
+ * Where a block of text sits, for one placement.
+ *
+ * Numbers, not "64vw": the auto-fit below does arithmetic on the width to
+ * count how many lines a cue wraps to, and "64vw" * 19.2 is NaN -- every
+ * comparison against NaN is false, so the fit silently did nothing and the
+ * clipped line stayed clipped. The unit is added at the point of use.
+ *
+ * The vertical values put banded text in the LOWER half. This is lyrics over a
+ * camera feed, so the text has to clear a performer's head and shoulders,
+ * which occupy the middle of frame. `center` = 56% is not the middle of the
+ * frame and is not meant to be: the band TOP is at 56%, so one line sits around
+ * 56-70% and a wrapped one 56-80%, both in the lower third where subtitle
+ * convention puts them.
+ */
+function geometry(place, position, W, H) {
+  const top = { top: 24, center: 56, bottom: 70 }[position || "center"];
+  switch (place) {
+    case "horizontal":
+      return { kind: "band", left: 11, width: 64, top, align: "left", prevScale: 0.7 };
+    case "vertical":
+      // Narrow enough that a long line stacks into a readable column instead
+      // of a single 84vw row, wide enough that the longest Allare cue (50
+      // characters) does not become eight lines tall.
+      return { kind: "band", left: 25, width: 50, top, align: "center", prevScale: 0.72 };
+    case "center":
+      // Centred on the frame rather than hung from a fixed top, which is what
+      // the flexbox version did and what "center" means.
+      return { kind: "centre", left: 8, width: 84, top: 50, align: "center", prevScale: 0.62 };
+    case "roam":
+    default:
+      return { kind: "roam", align: "center", prevScale: 0.8 };
+  }
+}
+
+/** The per-cue presentation, honouring --mode mix. */
+const mixPlan =
+  mode === "mix"
+    ? buildMixPlan({ seed: master, cueCount: cues.length, block: Number(mixBlock) || 8, spec: mixPlanSpec || "" })
     : null;
 
-  const textStyle = {
+// A non-mix mode is a one-entry plan repeated, so there is exactly one code path
+// that knows what a cue should look like -- not two that have to agree.
+const presentationAt = (cueIndex) => {
+  if (mixPlan && mixPlan[cueIndex]) return mixPlan[cueIndex];
+  if (mixPlan && mixPlan.length) return mixPlan[0];
+  const place = roam ? "roam" : horizontal ? "horizontal" : vertical ? "vertical" : "center";
+  return { id: place, place, unit: MODE_DEFAULT_UNIT, block: 0 };
+};
+
+const frameStyle = {
+  // "transparent" = alpha overlay (mov / ProRes 4444). A colour like
+  // "#000000" = keyable plate for containers without alpha (mp4): the
+  // consumer sets the layer blend to Add/Screen so black disappears.
+  backgroundColor: background || "transparent",
+  padding: "0 8vw",
+};
+
+// The opening and closing cards sit under the lyrics, so z-order is a non-issue
+// and there is only one place they have to be remembered.
+const opener = titleCard || titleCardOutro ? (
+  <TitleCard
+    t={t}
+    firstLyric={cues.length ? cues[0].time : NaN}
+    lastLyricEnd={cues.length ? cues[cues.length - 1].end : NaN}
+    title={title}
+    band={band}
+    color={color}
+    anyway={!!titleCard && titleCard !== "no"}
+    outro={!!titleCardOutro}
+  />
+) : null;
+
+// The song, so the finished file syncs against its own audio with no external
+// reference. This is inside the ONE return path, which is the only reason it
+// cannot go missing from a mode again.
+const song = AUDIO_FILE ? <Audio src={staticFile(AUDIO_FILE)} /> : null;
+
+if (idx < 0) {
+  return (
+    <AbsoluteFill style={{ ...frameStyle, alignItems: "center", justifyContent: "center" }}>
+      {song}
+      {opener}
+    </AbsoluteFill>
+  );
+}
+
+const cue = cues[idx];
+const since = t - cue.time;
+const until = cue.end - t;
+
+// -- AUTO-FIT ---------------------------------------------------------------
+//
+// A long line wraps, and a wrapped block grows DOWNWARD from a fixed top, so a
+// three-line line runs off the bottom of the frame. Measured on Allare: the
+// longest cue is 50 characters, and at 128px in a 64vw band it wraps to three
+// lines, the last of which is clipped -- text half off the screen, with no
+// error anywhere.
+//
+// The renderer cannot measure text while it renders, so the width is predicted
+// from a per-font table of coefficients, which scripts/calibrate_width.mjs fits
+// by rendering sample lines in the browser and measuring the ink they leave.
+// The classification is in src/width-model.mjs, shared with the calibration so
+// the two cannot drift.
+//
+// The three earlier attempts at this, and what each got wrong:
+//
+//   0.55em per code point     a Preeti font is ~0.48em per code point, so every
+//                             legacy line was predicted to wrap when it does
+//                             not and got shrunk ~28% for nothing
+//   0.7153em, the mean of     counting matras as full-width. Shaping reorders
+//     the whole Devanagari    a pre-base matra into space its consonant owns,
+//     block                   so the real cost is 0.334em per code point. This
+//                             one predicted THREE lines for a line the browser
+//                             draws on ONE and shrank it to 75%
+//   0.7480em, the mean of     narrow spaces averaged in with wide consonants
+//     consonants only
+//
+// Falls back to the per-class defaults when no table is supplied, so a still
+// rendered from an old props file still lays out rather than becoming NaN.
+const widthTable =
+  widthModel && typeof widthModel === "object" ? widthModel : null;
+
+// SAFETY MARGIN. The model is fitted from measurements, so it is a little wrong
+// in both directions, and the two directions are not equally bad. Under-
+// predicting width means the chosen size needs one line more than the budget
+// allows, and the last line runs off the bottom of the frame -- text half off
+// the screen, which is the failure this whole thing exists to prevent.
+// Over-predicting only costs a little size. So the width is inflated before the
+// decision, and the error is spent on size rather than on clipping.
+//
+// 8% is measured, not guessed: the leave-one-out error on the lines that
+// actually wrap is 1-6% on Allare (see scripts/calibrate_width.mjs), so 8% sits
+// just outside it.
+const WRAP_MARGIN = 1.08;
+
+const fit = (text, size, bandWidth) => {
+  const bandPx = bandWidth * (W_FRAME / 100);
+  const w = widthEm(text, widthTable) * WRAP_MARGIN;
+  const linesFor = (px) => Math.max(1, Math.ceil((w * px) / bandPx));
+  // The budget covers the current line AND the outgoing one above it, since
+  // both occupy the band at once.
+  const budget = H_FRAME * 0.34;
+  const needAt = (px) => linesFor(px) * px * 1.32;
+  if (needAt(size) <= budget) return size;
+  // Bisect rather than dividing once: the line count is a step function of the
+  // size, so the obvious size * (budget / need) can land on a size that still
+  // needs one line too many. It did, and the text stayed clipped.
+  let lo = 8;
+  let hi = size;
+  for (let i = 0; i < 18 && hi - lo > 0.5; i++) {
+    const mid = (lo + hi) / 2;
+    if (needAt(mid) <= budget) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+};
+
+/**
+ * Render one cue, positioned and sized for its presentation.
+ *
+ * `age` is how far through its own life the cue is, 0..1, used for the exit
+ * fade. `isPrev` shrinks and fades the outgoing line, which is what makes a
+ * change of placement read as the old layout dissolving rather than as a jump
+ * cut: the outgoing line is drawn in ITS OWN presentation, resolved
+ * independently, so a block boundary is a cross-fade between two layouts
+ * instead of the text teleporting.
+ */
+function renderCue(cueObj, isPrev, life) {
+  const pres = presentationAt(cueObj.index);
+  const g = geometry(pres.place, position, W_FRAME, H_FRAME);
+
+  const unitIsWord = pres.unit === "word";
+  // Per-letter and per-word features need the word spans to exist, because the
+  // letters nest inside them. Phrase presentations deliberately do not use them:
+  // "the whole line arrives at once" is the point of the phrase unit, and
+  // popping the letters one at a time would be the word unit wearing a
+  // different hat.
+  const spans = unitIsWord && (anim !== "off" || lAnim !== "off" || Number(letterVar) > 0);
+
+  let size = fontSize;
+  if (spans) {
+    // animatedWords() renders the spans at the parent's size and carries the
+    // variation internally, so the outer size is the base.
+  } else if (sizeMode === "phrase") {
+    size = fontSize * sizeFor(master, cueObj.index, Number(sizeVar) || 0);
+  } else if (sizeMode === "word" && !spans) {
+    size = fontSize;
+  }
+  if (isPrev) size *= g.prevScale;
+
+  const content = spans
+    ? animatedWords(cueObj.text, {
+        seed: master, index: cueObj.index, anim, sizeMode, sizeVar, t,
+        cueTime: cueObj.time, cueEnd: cueObj.end, letterAnim, letterSizeVar: letterVar,
+      })
+    : sizeMode === "word"
+      ? wordSpans(cueObj.text, master, cueObj.index, Number(sizeVar) || 0)
+      : cueObj.text;
+
+  // Banded and centred placements have a bounded width, so they wrap and need
+  // the fit. Roam does not: its anchor is already chosen so a 60vw block fits,
+  // and fitting it would shrink roam relative to every other mode.
+  const bandWidth = g.kind === "roam" ? 60 : g.width;
+  const shown = g.kind === "roam" ? size : fit(cueObj.text, size, bandWidth);
+
+  const base = {
     fontFamily: FONT_FAMILY,
     fontWeight: 700,
     ...(LEGACY_FONT_FAMILY ? { fontWeight: 400 } : {}),
     color,
     textShadow: shadow,
-    fontSize,
+    fontSize: shown,
     lineHeight: 1.32,
-    textAlign: "center",
+    textAlign: g.align,
     whiteSpace: "pre-wrap",
     margin: 0,
-    // Roam text is positioned, not centered: cap the width so a long line
-    // wraps instead of crossing the whole frame.
-    ...(roam ? { maxWidth: "60vw" } : {}),
-    // Horizontal is left-aligned, which is what makes a word-by-word sweep
-    // read as one left-to-right progression instead of a centred block
-    // re-growing from both ends.
-    ...(horizontal ? { textAlign: "left" } : {}),
+    ...(g.kind === "roam" ? { maxWidth: "60vw" } : {}),
   };
 
-  if (horizontal) {
-    // ONE band, left edge fixed, lines stack downward. The outgoing line
-    // keeps its place and fades rather than drifting, so the eye does not
-    // have to re-acquire the text.
-    //
-    // The band's own top offset is on the WRAPPER only. Putting the
-    // entrance/exit transform (st) on the same element would overwrite it --
-    // the same class of bug as roam's translate(-50%,-50%), which a glow
-    // scale() silently replaced so the block hung off the frame edge.
-    //
-    // AUTO-FIT. A long line wraps, and a wrapped block grows DOWNWARD from a
-    // fixed top, so a three-line line runs off the bottom of the frame.
-    // Measured on Allare: the longest cue is 50 characters, and at 128px in a
-    // 64vw band it wraps to three lines, the last of which is clipped -- text
-    // half off the screen, with no error anywhere.
-    //
-    // The renderer cannot measure text, so this estimates: Devanagari's
-    // average advance is about 0.55em, which is close enough to count the
-    // wrapped lines and therefore the block height. The estimate is a pure
-    // function of the text and the size, so it stays byte-identical between
-    // renders -- which matters, because the video has to keep matching the
-    // show file. When the estimate says the block is too tall, the line is
-    // scaled to fit rather than allowed to overflow.
-    //
-    // The budget covers the current line AND the outgoing one above it, since
-    // both occupy the band at once.
-    const budget = H_FRAME * 0.34;
-    const fit = (text, size) => {
-      const perLine = Math.max(
-        6,
-        Math.round(H_BAND.width * (W_FRAME / 100) / (size * 0.55))
-      );
-      const lines = Math.max(1, Math.ceil([...text].length / perLine));
-      const need = lines * size * 1.32;
-      return need > budget ? size * (budget / need) : size;
-    };
-    const curSize = fit(cue.text, cur.size);
-    const pvSize = prev ? fit(prev.text, pv.size * 0.7) : 0;
+  // The entrance/exit transform goes on an INNER element. Putting it on the
+  // positioned box let glow's scale() overwrite the box's own translate(-50%,
+  // -50%) and the block hung off the right edge of the frame; the same
+  // overwrite took the band's top offset with it.
+  const inner = { ...cueStyle(pickedFor(cueObj.index), since / ENTER, until / EXIT, jitterFor(master, cueObj.index)), display: "inline-block" };
 
-    return (
-      <AbsoluteFill style={frameStyle}>
-        {AUDIO_FILE ? <Audio src={staticFile(AUDIO_FILE)} /> : null}
-
-        <div
-          style={{
+  const box =
+    g.kind === "roam"
+      ? (() => {
+          const p = positionFor(master, cueObj.index);
+          return {
             position: "absolute",
-            left: H_BAND.left + "vw",
-            width: H_BAND.width + "vw",
-            top: H_BAND.top + "%",
-          }}
-        >
-          {prev && prevLife < 1 ? (
-            <div
-              style={{
-                ...textStyle,
-                fontSize: pvSize,
-                opacity: (1 - prevLife) * 0.55,
-              }}
-            >
-              {pv.content}
-            </div>
-          ) : null}
-          <div style={{ ...textStyle, fontSize: curSize }}>
-            <div style={{ ...st, display: "inline-block" }}>{cur.content}</div>
-          </div>
-        </div>
-        {opener}
-      </AbsoluteFill>
-    );
-  }
+            left: p.x + "%",
+            top: p.y + "%",
+            transform: "translate(-50%, -50%)",
+          };
+        })()
+      : {
+          position: "absolute",
+          left: g.left + "vw",
+          width: g.width + "vw",
+          top: g.top + "%",
+          // Only the centred placement translates; the bands hang from a fixed
+          // top so a wrapped block grows downward predictably.
+          ...(g.kind === "centre" ? { transform: "translateY(-50%)" } : {}),
+        };
 
-  if (roam) {
-    // In roam the outgoing line fades IN PLACE at its own position (measured
-    // behaviour of the reference video) instead of drifting to a fixed slot.
-    // The entrance/exit transform (st) goes on an INNER element: putting it
-    // on the positioned div let glow's scale() overwrite translate(-50%,-50%)
-    // and the block hung off the right edge of the frame.
-    const prevPos = prev ? layout(prev.index) : null;
-    return (
-      <AbsoluteFill style={frameStyle}>
-        {/* The song, so the finished file syncs against its own audio with no
-            external reference. This has to be in BOTH return paths: it was
-            only in the centre one, so every --mode roam render came out
-            silent while still reporting success. Silent and the right length
-            is an easy mistake to ship — nothing in the output says "no audio".
-            Verified with ffprobe: roam gave one stream (video), centre gave
-            two. */}
-        {AUDIO_FILE ? <Audio src={staticFile(AUDIO_FILE)} /> : null}
-
-        {prev && prevLife < 1 ? (
-          <div
-            style={{
-              ...textStyle,
-              ...prevPos,
-              opacity: (1 - prevLife) * 0.75,
-              fontSize: pv.size * 0.8,
-            }}
-          >
-            {pv.content}
-          </div>
-        ) : null}
-        <div style={{ ...textStyle, fontSize: cur.size, ...layout(cue.index) }}>
-          <div style={{ ...st, display: "inline-block" }}>{cur.content}</div>
-        </div>
-        {opener}
-      </AbsoluteFill>
-    );
-  }
+  // The outgoing line's own exit, which differs by placement: banded layouts
+  // drift, roam dissolves in place (that is the reference video's measured
+  // behaviour) and centre drifts up by a fixed amount.
+  const exit = isPrev
+    ? g.kind === "roam"
+      ? {}
+      : g.kind === "centre"
+        ? { transform: `translateY(${-life * 30}px)` }
+        : {}
+    : {};
 
   return (
-    <AbsoluteFill style={frameStyle}>
-      {/* The song itself, so the finished .mov is self-contained: drop it on a
-          Videosync2 layer and it syncs against its own audio with no external
-          reference. */}
-      {AUDIO_FILE ? <Audio src={staticFile(AUDIO_FILE)} /> : null}
-
-      {prev && prevLife < 1 ? (
-        <div
-          style={{
-            ...textStyle,
-            position: "absolute",
-            fontSize: pv.size * 0.62,
-            opacity: (1 - prevLife) * 0.75,
-            transform: `translateY(${-prevLife * 30}px)`,
-          }}
-        >
-          {pv.content}
-        </div>
-      ) : null}
-
-      <div style={{ ...textStyle, fontSize: cur.size, ...st }}>{cur.content}</div>
-      {opener}
-    </AbsoluteFill>
+    <div style={{ ...base, ...box, ...exit, opacity: isPrev ? (1 - life) * 0.55 : undefined }}>
+      <div style={inner}>{content}</div>
+    </div>
   );
+}
+
+/** The entrance style for a cue, resolved the same way for it and its predecessor. */
+function pickedFor(cueIndex) {
+  return styleFor(master, cueIndex, style);
+}
+
+return (
+  <AbsoluteFill style={frameStyle}>
+    {song}
+
+    {/* The outgoing line is drawn first, so the current line paints over it in
+        the one frame where both are visible. Each is placed by its OWN
+        presentation, which is what makes a block boundary a cross-fade between
+        layouts instead of a jump. */}
+    {prev && prevLife < 1 ? renderCue(prev, true, prevLife) : null}
+    {renderCue(cue, false, 0)}
+
+    {opener}
+  </AbsoluteFill>
+);
 };

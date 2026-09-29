@@ -482,6 +482,178 @@ a grey rectangle over the camera feed. `scripts/reference_survey.py` checks
     regresses. It asserts on the line the render *prints*, because that is the
     only thing that proves the ends reached the timeline.
 
+20. **A width model is a guess until it is measured, and a plausible-looking
+    wrong number is the worst outcome** (gotcha 20). The auto-fit has to decide
+    a font size *before* anything renders, so it predicts a line's width. Three
+    estimates were shipped and all three were wrong in the same direction --
+    over-predicting, so the text was shrunk for a wrap that never happened:
+
+    | Estimate | Nirmala UI | Error |
+    |---|---|---|
+    | `0.55em` per code point | — | A Preeti face is ~0.48em, so every legacy line lost ~28% of its size. |
+    | mean of the font's `hmtx` advances | 0.7153em | Counts a pre-base matra as full width; shaping reorders `ि` into its consonant's cell, so the truth is ~0.33em per code point. Predicted **three** lines for a line the browser draws on **one**, and shrank it to 75%. |
+    | mean over consonants only | 0.7480em | Still averages narrow spaces with wide consonants. |
+
+    The fix is to measure the **browser**, not the font file: the browser is
+    what does the shaping. `scripts/calibrate_width.mjs` renders sample lines
+    through the same engine that will render the video, measures the ink with
+    Pillow, and fits one coefficient per class. Three things to not re-learn:
+
+    - **One sample per IMAGE.** The first version put all ten samples in one
+      tall frame and scanned 220px bands. A Devanagari matra at 200px extends
+      well outside its line box, so every band included its neighbours' ink --
+      five digits "measured" 1782px. There is no band boundary to get wrong if
+      there is only one line in the frame.
+    - **Pass the sample as an INDEX, never as text.** A Devanagari string in
+      Remotion `inputProps` came back empty. An empty frame measures as zero
+      width rather than as an error, so the fit happily produced coefficients
+      from nothing. The list goes in a GENERATED module, the way
+      `lyrics.generated.js` does, and it has to be written **before** the
+      bundle is built or the composition holds the previous run's list.
+    - **Do NOT short-sample the fit.** A one-character sample measures wider per
+      character than the same character in a run, because a lone glyph carries
+      its full side bearing. Fitting on them biased every coefficient upward --
+      reintroducing the original bug through the calibration. And report
+      leave-one-out error, not in-sample: a 3-coefficient model always looks
+      perfect on its own training data.
+
+    Coefficients are constrained to `>= 0`. Two of them fitted *negative*
+    (`conj` -0.077em, `matra` -0.108em) because those classes are collinear
+    with `cons` -- a conjunct always replaces a consonant -- and the solve was
+    free to make one negative to pay for the other. It predicted its own
+    training set to 0.0% and was 43% out one line away. There is deliberately
+    **no separate conjunct coefficient**: a conjunct is counted as one
+    consonant, which costs ~9% on a pure-conjunct line and removes the
+    degeneracy entirely.
+
+    Current numbers on Allare: `cons 0.6287em`, `matra 0`, `space 0.4470em`;
+    **2.0% leave-one-out on the lines that wrap, 0 of 12 wrap/no-wrap
+    disagreements.** `matra` being 0 is correct, not a degenerate fit -- a
+    pre-base matra really is free in this font.
+
+21. **`classifyText()` must look FORWARD FROM THE CONSONANT, not from the
+    virama** (gotcha 21). `क्ष` is ka + virama + ssa and draws as one glyph. The
+    conjunct rule started at the virama, so the leading consonant was counted
+    on its own and the virama then began a second count: `क्ष` came out as TWO
+    consonants, exactly the error the rule exists to prevent, and a calibration
+    passed with it in place. The cell belongs to the ka, so the ka is where the
+    test starts.
+
+    The class ranges are `\u` escapes on purpose. Written as literal Devanagari
+    in a regex the boundaries are invisible in a diff — and "space" was once
+    `U+0020..U+207F`, which **contains the whole Devanagari block**, so every
+    character classified as a space, one column of the design matrix was ever
+    non-zero, and the fit came back singular with a message blaming the samples.
+    `scripts/check_width_model.mjs` asserts disjointness, that nothing
+    width-carrying falls into `other`, and that `widthEm()` is monotonic.
+
+23. **A legacy font whose layout VERIFIES is not a legacy font whose LYRICS
+    survive** (gotcha 23). This is the distinction that matters and the one
+    that is easiest to miss, because everything upstream of it looks healthy.
+
+    `nepali-legacy-fonts` reports a font as *usable* when every key in its
+    layout reaches a real glyph in its `.ttf`. That is a statement about the
+    font. It says nothing about whether the song's words can be written in that
+    font's keys — and for Allare they cannot:
+
+    ```
+    12 of 35 lines (34%) contain a character with no key
+    U+0901 candrabindu  x13      U+094D virama  x11
+    15 distinct words affected
+    ```
+
+    Measured on AMS Manthan, the one font the font repo calls *proven*. The
+    converter says so itself, once per affected line:
+
+    ```
+    !! not round-trip exact: 'फर्केर' -> 'fker'
+    !! not round-trip exact: 'हो.. खोला वारि म कहिले' -> 'hea.. Kaealaa vaair ma kihlae'
+    ```
+
+    `फर्केर` becomes `फरकर` on screen — a **different word** — because the े matra
+    and the `र्` half-form are not in the layout. The render exits 0, the file
+    is the right length, the plate is pure black, and `check_output.py` passes
+    every check, because none of those can see a wrong letter.
+
+    So before choosing a legacy font for a song, convert the song and count what
+    does not survive. `scripts/lrc_legacy.py` prints the round-trip failures, and
+    any line it complains about is a line that will be wrong on screen. A **Unicode
+    font has no equivalent failure**: nothing is transcoded, so there is no
+    layout that can be wrong. That is why the default is Unicode, and why
+    "zero transcoding" beats "a nicer typeface" when the letters have to be
+    right.
+
+    Note also that a legacy font needs a different width model: the text handed
+    to it is ASCII key sequences, so every character classifies as `space` and
+    the per-class model collapses. It gets one measured number instead —
+    `per code point` — see `widthEm()` in src/width-model.mjs.
+
+25. **A calibration that measures the wrong font is worse than none, and it
+    looks exactly like a good one** (gotcha 25). `WidthCalib` did not register
+    the `--font-file` face, because the registration lived at the top of
+    `LyricOverlay.jsx` and the calibration renders a *different composition* that
+    does not import it. The stack fell through to Nirmala UI.
+
+    The tell was in the numbers, and it was only noticed by looking:
+    **Yantramanav Black came out bit-identical to Nirmala UI** — `cons 0.6287,
+    matra 0, space 0.4470` for both, to four decimals. Two different typefaces
+    cannot have the same measured advance.
+
+    So:
+    - every composition that draws text registers the font it was asked for;
+    - the calibration **verifies** the face after preparing it, by reading the
+      family name back out of `src/lyrics.generated.js` and failing if it is not
+      the one asked for;
+    - and the render log prints which table it used, with the coefficients, so a
+      duplicate is visible without reading the JSON.
+
+    The general rule: a measurement step that cannot report *what it measured* is
+    a measurement step you have to take on faith, and this project has already
+    been bitten three ways by that — a file that was never written, a font that
+    was never loaded, and a layout that verified its own keys instead of the
+    song's words.
+
+26. **A comparison has to isolate the one variable it is comparing**
+    (gotcha 26). The first contact sheet rendered the fifteen candidate faces
+    exactly as a video render does: karaoke word animation, per-letter pop, a
+    60px glow. Every row came out as a featureless white blob — the shirorekha
+    bars of adjacent glyphs merged through the glow and the heavy display
+    weights filled what was left. Fifteen different fonts, none of them
+    comparable.
+
+    `scripts/contact_sheet.mjs` now uses no word animation, no per-letter
+    animation, a tight shadow and a size chosen to sit in the band. Same lesson
+    as the width model: the point of a sheet is to see the one thing, so nothing
+    else may be in it.
+
+22. **A module-level throw beats a subtly worse video** (gotcha 22). `mix.js`
+    asserts at import time that its presentation list alternates placements,
+    including last-to-first, because the deck depends on it. Adding a ninth
+    presentation with a repeated placement would otherwise produce a plan that
+    stutters at every cycle seam with no error.
+
+    Related, and found the hard way: the first version picked presentations
+    with a **strided walk** and nudged colliding neighbours forward. That fixed
+    the local stutter and broke the global guarantee -- the nudged slot was then
+    never dealt, so `r-word` and `c-word` were missing from the entire 109-cue
+    video with no error and no visible cause. A **shuffled deck** gives coverage
+    and no-stutter by construction instead of by repair.
+
+24. **Do not let an error handler print advice that hides the error**
+    (gotcha 24). The `--mix-plan` catch block printed "the eight presentations
+    are: ..." under whatever went wrong. For several turns that buried a real
+    `Cannot access 'seed' before initialization` -- a temporal dead zone from
+    moving the block above where `seed` is declared -- under a paragraph about
+    presentation names, so the symptom looked like a bad `--mix-plan` and the
+    fix looked like editing the plan.
+
+    Two rules from that. An error handler must **print the error first and
+    unconditionally**; advice goes after it and only when it applies. And
+    anything referenced from a `catch` has to be declared **outside** the
+    `try`: a `const` in the `try` is in its temporal dead zone in the `catch`,
+    so the handler throws a `ReferenceError` while reporting the original
+    problem.
+
 ## The shape of the roam audio bug, in one line
 
 A component with **two** return paths will eventually have a side element in
@@ -489,6 +661,12 @@ only one of them, and the path that misses it is whichever one a later style
 flag selects. `--mode roam` is the recommended style, so the broken path was
 also the default one. When you add a branch here, diff it against the others
 for anything that is not a style: `<Audio>`, a provider, a `<Sequence>`.
+
+**That is now moot: there is ONE return path.** Placement became a per-cue
+property when `mix` arrived, because `mix` needs a per-cue placement and adding
+it to a fourth and fifth copy of the same JSX was four more chances to leave
+something out of one of them. If you add a placement, add it to `geometry()` in
+`LyricOverlay.jsx` — there is nowhere else it can go wrong.
 
 ## Measuring video: traps that produce confidently wrong numbers
 

@@ -1,0 +1,56 @@
+{
+  "Nirmala UI": {
+    "cons": 0.4781183050526114,
+    "matra": 0.25438359086169277,
+    "space": 0.513721442790787,
+    "other": null,
+    "fitted": [
+      "cons",
+      "matra",
+      "space"
+    ],
+    "pixelSize": 200,
+    "worstError": 0.4312811022680901,
+    "calibratedAt": "2026-09-29"
+  },
+  "Nirmala UI +song": {
+    "fitted": [
+      "cons",
+      "matra",
+      "space"
+    ],
+    "cons": 0.62873,
+    "matra": 0,
+    "space": 0.44702,
+    "other": null,
+    "pixelSize": 200,
+    "worstError": 0.019805891301447855,
+    "inSampleWorstError": 0.5796713155265812,
+    "calibratedOn": "Allare Remotion.lrc",
+    "calibratedAt": "2026-09-29"
+  },
+  "AMS Manthan": {
+    "perChar": 0.36381,
+    "model": "per-char",
+    "pixelSize": 200,
+    "worstError": 0.508365891705844,
+    "calibratedOn": "C:\\Users\\Admin\\tools\\nepali-legacy-fonts\\layouts\\ams-manthan.json",
+    "calibratedAt": "2026-09-29"
+  },
+  "Yantramanav +song": {
+    "fitted": [
+      "cons",
+      "matra",
+      "space"
+    ],
+    "cons": 0.53647,
+    "matra": 0,
+    "space": 0.58475,
+    "other": null,
+    "pixelSize": 200,
+    "worstError": 0.008579086252694965,
+    "inSampleWorstError": 0.482085521496046,
+    "calibratedOn": "Allare Remotion.lrc",
+    "calibratedAt": "2026-09-29"
+  }
+}

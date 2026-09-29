@@ -1,8 +1,10 @@
-﻿import React from "react";
+import React from "react";
 import { Composition, staticFile } from "remotion";
 import { getAudioDurationInSeconds } from "@remotion/media-utils";
 import { parseLrc } from "./parse-lrc.mjs";
 import { LyricOverlay } from "./LyricOverlay.jsx";
+import { WidthCalib } from "./WidthCalib.jsx";
+import { SAMPLE_W, SAMPLE_H } from "./width-model.mjs";
 import { LRC_TEXT, AUDIO_FILE, AUDIO_SECONDS } from "./lyrics.generated.js";
 
 const parsed = parseLrc(LRC_TEXT);
@@ -18,8 +20,23 @@ const FALLBACK_SECONDS = Math.max(
 
 export const RemotionRoot = () => {
   return (
-    <Composition
-      id="LyricOverlay"
+    <>
+      <Composition
+        id="WidthCalib"
+        component={WidthCalib}
+        durationInFrames={1}
+        fps={1}
+        width={SAMPLE_W}
+        height={SAMPLE_H}
+        // Both props are declared with defaults because Remotion resolves the
+        // composition BEFORE inputProps are applied. A prop with no default and
+        // no value renders as undefined, which draws an empty frame, and an
+        // empty frame measures as zero width -- a silent nonsense number
+        // rather than an error.
+        defaultProps={{ font: "", index: 0 }}
+      />
+      <Composition
+        id="LyricOverlay"
       component={LyricOverlay}
       durationInFrames={Math.round(FALLBACK_SECONDS * 30)}
       fps={30}
@@ -118,6 +135,7 @@ export const RemotionRoot = () => {
         // "#000000" for mp4 so the plate is keyable with Add/Screen blend.
         background: "transparent",
       }}
-    />
+      />
+    </>
   );
 };
