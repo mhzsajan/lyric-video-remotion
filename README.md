@@ -161,7 +161,7 @@ Ableton and the video can never disagree.
 | `--report-only` | Print the cue list and exit. No render at all. |
 | `--style <name>` | Pin every line to one animation instead of mixing. |
 | `--position <pos>` | `top` / `center` / `bottom` (default `center`). |
-| `--mode <m>` | `center` (default) or `roam` — each line gets its own seeded position, the reference-video look. **Use `roam`.** |
+| `--mode <m>` | How a line is **placed**: `center` (default), `roam` (own spot per line), `horizontal` (one left-aligned band). See below. |
 | `--format <f>` | `mp4` (default, ~6 MiB, black bg) or `mov` (ProRes 4444, real alpha, ~3 GB). |
 | `--size <px>` | Font size, default `104`. |
 | `--size-mode <m>` | Random size per `word` (default) or per `phrase`, or `off`. |
@@ -178,6 +178,49 @@ Ableton and the video can never disagree.
 
 Animations: `fade`, `rise`, `pop`, `slide-left`, `slide-right`, `typewriter`,
 `blur-in`, `zoom-through`.
+
+## Placement: `--mode`
+
+`--mode` is how a line is **placed** on the frame. It is independent of
+`--word-anim` / `--letter-anim`, which control how a line is **animated** once
+placed.
+
+| Mode | Look |
+|---|---|
+| `center` | Lines stack in the middle, the outgoing one drifts up. |
+| `roam` | Each line gets its own seeded spot — the reference-video look. |
+| **`horizontal`** | **One left-aligned band in the lower third; lines stack downward, words arrive left to right.** |
+
+### Use `horizontal` with word-by-word animation
+
+`roam` fights a karaoke sweep. In roam each line lands somewhere new, so the
+audience re-finds the text on every line, and a word-by-word highlight has to
+chase a target that keeps jumping. Pinned to one band, the same animation
+reads as a single continuous left-to-right progression — which is the whole
+point of it.
+
+```bash
+node render.mjs song.mp3 song.lrc --no-audio --length 409.13 \
+    --font "Nirmala UI" --size 128 \
+    --mode horizontal --word-anim karaoke
+```
+
+Band geometry: left edge `11vw`, width `64vw`, top `56%` (`--position` moves
+it: `top` 24%, `center` 56%, `bottom` 70%). The band sits in the **lower**
+half on purpose — it is lyrics over a camera feed, so the text has to clear a
+performer's head and shoulders.
+
+**Long lines auto-fit.** A wrapped block grows downward from a fixed top, so a
+long cue would otherwise run off the bottom of the frame. Allare's longest cue
+is 50 characters; at 128px in a 64vw band it wraps to three lines and the last
+one is clipped off the screen — with no error anywhere. The renderer cannot
+measure text, so it estimates the wrap from character count and average
+Devanagari advance (~0.55em), then scales the line to fit a 34%-of-frame
+budget. The estimate is a pure function of the text and the size, so a
+re-render is still byte-identical.
+
+The two render paths through `LyricOverlay` are separate, so check a new one
+against the others for anything that is not a style — see gotcha 15.
 
 ## Two things worth knowing
 

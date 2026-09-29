@@ -438,7 +438,25 @@ a grey rectangle over the camera feed. `scripts/reference_survey.py` checks
     `ffmpeg -i out/X.mp4 -vf "fps=1/6,cropdetect=limit=0.04" -f null -` finds
     every instance in seconds. Both songs rescanned 100 % clean after the
     anchor fix.
-17. **`gh repo create --source . --push` fails if the remote already exists**
+17. **A wrapped lyric block grows DOWNWARD from a fixed top, so it runs off
+    the bottom of the frame — and `--mode horizontal` has to auto-fit.**
+    Allare's longest cue is 50 characters; at `--size 128` in a 64vw band it
+    wraps to three lines and the third is clipped off the bottom of the
+    screen, silently. The renderer cannot measure text, so `fit()` estimates
+    the wrap from character count and average Devanagari advance (~0.55em),
+    then scales the line into a 34%-of-frame budget covering the current line
+    and the outgoing one.
+
+    **The estimate is only as good as its arithmetic, and a CSS string broke
+    it silently.** `H_BAND.width` was `"64vw"`, so `width * (W_FRAME / 100)`
+    was `NaN`; every comparison against `NaN` is false, the fit never fired,
+    and the clipped line stayed clipped with no error. Geometry constants
+    that participate in arithmetic are stored as **numbers**, with the unit
+    added at the point of use.
+
+    This is roam's clipping bug in a new place. Roam bounds its anchor
+    (gotcha 13); horizontal bounds its block height. Neither can see the other.
+18. **`gh repo create --source . --push` fails if the remote already exists**
     (`GraphQL: Name already exists`). Check `git remote -v` first and just
     push. Transient `Failed to connect to github.com:443` also happens here —
     retry.

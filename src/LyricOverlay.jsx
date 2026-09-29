@@ -329,7 +329,7 @@ export function cueStyle(style, p, q, j) {
 
 export const LyricOverlay = ({ cues, title, band, seed, style, fontSize, color, shadow, position, background, mode, sizeMode, sizeVar, wordAnim, letterAnim, letterVar, titleCard, titleCardOutro }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, width: W_FRAME, height: H_FRAME } = useVideoConfig();
   const t = frame / fps;
   const master = seed || "song";
   const anim = WORD_ANIMS.includes(wordAnim) ? wordAnim : "off";
@@ -377,10 +377,23 @@ export const LyricOverlay = ({ cues, title, band, seed, style, fontSize, color, 
     bottom: { justifyContent: "flex-end", paddingBottom: "9vh" },
   }[position || "center"];
 
-  // Roam mode: each line owns a seeded position (the reference-video style).
-  // Position comes from the CUE's own index, so the previous line keeps its
-  // spot while fading — the two briefly coexist at different places.
+  // --mode: how a line is PLACED on the frame. This is independent of
+  // --word-anim / --letter-anim, which control how a line is ANIMATED once it
+  // is placed.
+  //
+  //   center     (default) lines stack in the middle, the outgoing one drifts up
+  //   roam       each line gets its own seeded spot (the reference-video look)
+  //   horizontal one left-aligned band, lines stack downward — the karaoke /
+  //              subtitle look, where the eye follows a single line of text
+  //              rather than chasing a word appearing in five different places
+  //
+  // Horizontal exists because roam fights word-by-word animation. In roam each
+  // line lands somewhere new, so a karaoke sweep has the audience re-finding
+  // the text on every line; with the text pinned to one band the sweep reads
+  // as a single continuous left-to-right progression, which is the whole point
+  // of it. The two are compatible but not equally legible.
   const roam = mode === "roam";
+  const horizontal = mode === "horizontal";
   const layout = (cueIndex) => {
     if (!roam) return null;
     const p = positionFor(seed || "song", cueIndex);
@@ -390,6 +403,32 @@ export const LyricOverlay = ({ cues, title, band, seed, style, fontSize, color, 
       top: p.y + "%",
       transform: "translate(-50%, -50%)",
     };
+  };
+
+  // Horizontal band geometry.
+  //
+  // The band is anchored to a COLUMN, not a row: every line starts at the same
+  // left edge and wraps downward. `width` is what forces the wrap, and it has
+  // to be bounded for the same reason roam's anchor is — a full-width line
+  // would run off the right edge. 64vw leaves a real margin at 1920 and still
+  // fits a long line without breaking after two words.
+  //
+  // These are NUMBERS, not "64vw". The auto-fit below does arithmetic on the
+  // width to work out how many lines a cue will wrap to, and "64vw" * 19.2 is
+  // NaN — every comparison against NaN is false, so the fit silently did
+  // nothing and the clipped line stayed clipped. The unit is added at the
+  // point of use.
+  //
+  // The vertical values put the band in the LOWER half by default. This is
+  // lyrics over a camera feed, so the text must clear a performer's head and
+  // shoulders, which occupy the middle of frame. `center` = 56% is not the
+  // middle of the frame and is not meant to be: the band TOP is at 56%, so a
+  // single line sits around 56-70% and a wrapped one 56-80%, both in the
+  // lower third where subtitle convention puts them.
+  const H_BAND = {
+    left: 11,
+    width: 64,
+    top: { top: 24, center: 56, bottom: 70 }[position || "center"],
   };
 
   const frameStyle = {
@@ -455,7 +494,82 @@ export const LyricOverlay = ({ cues, title, band, seed, style, fontSize, color, 
     // Roam text is positioned, not centered: cap the width so a long line
     // wraps instead of crossing the whole frame.
     ...(roam ? { maxWidth: "60vw" } : {}),
+    // Horizontal is left-aligned, which is what makes a word-by-word sweep
+    // read as one left-to-right progression instead of a centred block
+    // re-growing from both ends.
+    ...(horizontal ? { textAlign: "left" } : {}),
   };
+
+  if (horizontal) {
+    // ONE band, left edge fixed, lines stack downward. The outgoing line
+    // keeps its place and fades rather than drifting, so the eye does not
+    // have to re-acquire the text.
+    //
+    // The band's own top offset is on the WRAPPER only. Putting the
+    // entrance/exit transform (st) on the same element would overwrite it --
+    // the same class of bug as roam's translate(-50%,-50%), which a glow
+    // scale() silently replaced so the block hung off the frame edge.
+    //
+    // AUTO-FIT. A long line wraps, and a wrapped block grows DOWNWARD from a
+    // fixed top, so a three-line line runs off the bottom of the frame.
+    // Measured on Allare: the longest cue is 50 characters, and at 128px in a
+    // 64vw band it wraps to three lines, the last of which is clipped -- text
+    // half off the screen, with no error anywhere.
+    //
+    // The renderer cannot measure text, so this estimates: Devanagari's
+    // average advance is about 0.55em, which is close enough to count the
+    // wrapped lines and therefore the block height. The estimate is a pure
+    // function of the text and the size, so it stays byte-identical between
+    // renders -- which matters, because the video has to keep matching the
+    // show file. When the estimate says the block is too tall, the line is
+    // scaled to fit rather than allowed to overflow.
+    //
+    // The budget covers the current line AND the outgoing one above it, since
+    // both occupy the band at once.
+    const budget = H_FRAME * 0.34;
+    const fit = (text, size) => {
+      const perLine = Math.max(
+        6,
+        Math.round(H_BAND.width * (W_FRAME / 100) / (size * 0.55))
+      );
+      const lines = Math.max(1, Math.ceil([...text].length / perLine));
+      const need = lines * size * 1.32;
+      return need > budget ? size * (budget / need) : size;
+    };
+    const curSize = fit(cue.text, cur.size);
+    const pvSize = prev ? fit(prev.text, pv.size * 0.7) : 0;
+
+    return (
+      <AbsoluteFill style={frameStyle}>
+        {AUDIO_FILE ? <Audio src={staticFile(AUDIO_FILE)} /> : null}
+
+        <div
+          style={{
+            position: "absolute",
+            left: H_BAND.left + "vw",
+            width: H_BAND.width + "vw",
+            top: H_BAND.top + "%",
+          }}
+        >
+          {prev && prevLife < 1 ? (
+            <div
+              style={{
+                ...textStyle,
+                fontSize: pvSize,
+                opacity: (1 - prevLife) * 0.55,
+              }}
+            >
+              {pv.content}
+            </div>
+          ) : null}
+          <div style={{ ...textStyle, fontSize: curSize }}>
+            <div style={{ ...st, display: "inline-block" }}>{cur.content}</div>
+          </div>
+        </div>
+        {opener}
+      </AbsoluteFill>
+    );
+  }
 
   if (roam) {
     // In roam the outgoing line fades IN PLACE at its own position (measured

@@ -471,9 +471,20 @@ async function run(audioPath, lrcPath) {
   const seed = flag("--seed") || parsed.title || title;
   props.seed = seed;
   if (flag("--shadow")) props.shadow = flag("--shadow");
-  // --mode roam = every line appears at its own seeded position (the
-  // reference-video style); default keeps the centered stacked look.
-  if (flag("--mode")) props.mode = flag("--mode");
+  // --mode = how a line is PLACED. Independent of --word-anim, which controls
+  // how it is animated once placed.
+  //   center     (default) lines stack in the middle, outgoing drifts up
+  //   roam       each line gets its own seeded spot (reference-video look)
+  //   horizontal one left-aligned band, lines stack down -- the karaoke look,
+  //              where the eye follows one line instead of chasing a word that
+  //              moves every line. Pair it with --word-anim karaoke.
+  const MODE = flag("--mode") || "";
+  if (MODE && !["center", "roam", "horizontal"].includes(MODE)) {
+    console.error('  Unknown --mode "' + MODE + '". Use center, roam or horizontal.');
+    process.exitCode = 1;
+    return;
+  }
+  if (MODE) props.mode = MODE;
   // Random font size. "word" varies each word of a line, "phrase" scales the
   // whole line once, "off" disables it. --size-var is the max deviation from
   // 1.0 (0.15 = 85%..115%) and is clamped: past 0.45 the small words stop
@@ -640,7 +651,8 @@ if (BATCH) {
       "    --preview        fast, small, no alpha -- check timing first",
       "    --no-audio       leave the audio track out of the output",
       "    --font <family>  font family to render with",
-      "    --mode <mode>    roam (random spot per line) | center (default)",
+      "    --mode <mode>    center (default) | roam (random spot per line) |\n" +
+    "                     horizontal (one left-aligned band; pair with karaoke)",
       "    --format <fmt>   mp4 (h264 black bg, default) | mov (prores alpha)",
       "    --legacy-font <f> use a Preeti-era font (.ttf), converting the lyrics\n                     to its key layout (needs python + npttf2utf);",
       "    --fps <n>        output frame rate (default: 30 mp4 / 60 mov)",
