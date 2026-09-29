@@ -72,8 +72,8 @@ the word comes out in two typefaces, and the stray mark reads as a `0` or an
 Check before rendering anything:
 
 ```bash
-py scripts/passthrough.py layouts/ams-manthan.json "song.lrc"
-py scripts/diag_encode.py layouts/ams-manthan.json --lrc "song.lrc"
+py scripts/passthrough.py ..\nepali-legacy-fonts\layouts\ams-manthan.json "song.lrc"
+py scripts/diag_encode.py ..\nepali-legacy-fonts\layouts\ams-manthan.json --lrc "song.lrc"
 ```
 
 And read the render log: `!! not round-trip exact: 'x' -> 'keys'` means that
@@ -121,7 +121,7 @@ costs seconds and is the only step that catches a wrong font — a bad layout
 does not error, it renders the wrong letters.
 
 ```bash
-node render.mjs song.mp3 song.lrc --legacy-font ams.manthan.ttf --layout-file layouts/ams-manthan.json --prepare-only
+node render.mjs song.mp3 song.lrc --font-slug ams-manthan --prepare-only
 npx remotion still src/index.js LyricOverlay out/check.png --frame=2400 --props=out/props.json
 ```
 
@@ -505,7 +505,8 @@ Fonts that need **no** transcoding at all — nine Unicode Devanagari families
 (Noto Sans/Serif, Mukta, Hind, Tiro, Yantramanav, Martel, Halant, Kalam),
 each verified with fontTools for Devanagari coverage and GSUB/GPOS shaping,
 all SIL OFL 1.1 and safe for broadcast — are listed in **`docs/FONTS.md`**.
-`python scripts/font_survey.py <folder>` re-runs that survey on any folder.
+The survey tool itself moved to the **font repo** with the rest of the font
+tooling: `py ..\nepali-legacy-fonts\scripts\font_survey.py <folder>`.
 
 ## The target look
 

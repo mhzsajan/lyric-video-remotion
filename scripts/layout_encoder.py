@@ -90,8 +90,8 @@ def load_extra_layouts(path):
     npttf2utf ships five Nepali layouts. A legacy font outside those five --
     AMS Manthan among them, which produces collapsed glyphs and literal `==`
     when fed Preeti keys -- has no map anywhere, so one is generated from the
-    font's published character table by scripts/anepali_charmap.py and merged
-    in here.
+    font's published character table by the font repo's anepali_charmap.py and
+    merged in here.
 
     Round-trip verification needs npttf2utf's own decoder, which only knows its
     five. A generated layout is therefore trusted on its own evidence: the

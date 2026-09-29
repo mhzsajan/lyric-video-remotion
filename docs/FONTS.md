@@ -1,241 +1,141 @@
-# Fonts — what actually works here
+# Fonts in the renderer
 
-Two completely separate ways to get Devanagari onto the screen. Pick one;
-mixing them up is the failure that cost the most time.
+**This repo renders video. It does not make fonts.** Key layouts, the font
+catalogue, the tier table and the tooling that decides whether a font can write
+a given song all live in
+[mhzsajan/nepali-legacy-fonts](https://github.com/mhzsajan/nepali-legacy-fonts).
 
-| Track | Input text | Renderer sees | Command |
-|---|---|---|---|
-| **A — Unicode** | real Devanagari (`फर्केर`) | U+0900 block | `--font "Mukta"` |
-| **B — Legacy** | Preeti ASCII keys (`kms]{/`) | U+0020 block | `--legacy-font Abhinav.TTF` |
+What follows is only what you need *at render time*.
 
-A font belongs to one track. Ask it three questions.
+## Pick one of three paths
 
-## Why these fonts are like this (the history)
+| | Use | Risk of a wrong letter |
+|---|---|---|
+| **Unicode** | `--font-file <ttf>` or `--font "<Family>"` | **None.** Native codepoints, no conversion. |
+| **Legacy** | `--font-slug <slug>` or `--legacy-font` | Real. Check the song first — see below. |
+| **Default stack** | neither flag | Silent. See "the flag that looks ignored". |
 
-They were built for **legacy Encoded-Nepali** workflows — Preeti and friends.
-You were never meant to type Devanagari: you typed ASCII, and the font's ASCII
-glyphs *were drawn as* Devanagari, laid out in byte order. The font and the
-encoding were a matched pair.
-
-Legacy Windows text stacks (GDI, font-linking, ANSI codepage tricks) render
-them happily. The modern web stack refuses by design: HarfBuzz shaping plus
-strict Unicode cmaps. That is the whole reason they "look fine in the old
-editor but do nothing in the browser" — and why the fix was to convert the
-**text** into the font's native encoding, not to convert the font.
-
-## The three checks
-
-A font renders Devanagari in Chromium only if **all three** hold:
-
-1. **cmap covers U+0900–U+097F.** Otherwise Chromium has no glyph to pick and
-   silently substitutes a *different font, character by character*. No error,
-   no warning — you just get the wrong typeface mid-word. This is why
-   `--font "AMS Manthan"` did nothing: the font was installed, it simply did
-   not know what `क` was.
-2. **GSUB/GPOS shaping tables exist.** Devanagari is an abugida, not a list of
-   letters: `क`+`्`+`ष` must be rewritten into the `क्ष` ligature, and `ि`
-   is *after* its consonant in bytes but *before* it on screen. That rewriting
-   is done by the shaping engine reading these tables. Fonts here were made
-   with Fontographer 4.1.5 (2000) and have none — so even with a fixed cmap,
-   every conjunct would break.
-3. **The text encoding matches the font's expectation.** Track B fonts predate
-   Unicode for Nepali: you were never meant to type Devanagari, you typed
-   ASCII and the font's ASCII glyphs *were drawn as* Devanagari, laid out in
-   byte order. They are an encoding, not just a font.
-
-A font failing (1) or (2) while still "installed" is the whole reason this
-was hard. Run the survey instead of guessing:
+Reach for a Unicode font unless the typeface specifically matters. The 58
+Unicode faces are listed in the font repo's README; `out/contact-sheet.png`
+here renders 15 of them side by side.
 
 ```bash
-python scripts/font_survey.py "path/to/fonts" "another/folder"
+# any .ttf, used exactly as it is
+node render.mjs song.mp3 song.lrc --font-file C:\path\YantraManav-Black.ttf
 ```
 
-Prints `UNICODE-OK` / `UNICODE-NO-SHAPING` / `LEGACY` per file, with Devanagari
-coverage, Latin coverage, GSUB/GPOS presence and the name-table licence.
+No layout, no transcoding, no Python. The family name is read from the font
+file, so you do not pass `--font` as well.
 
----
+## `--font-slug`: font and layout together
 
-## Track A — verified Unicode fonts
-
-Surveyed 2026-09-29. Every file was **parsed with fontTools and its tables
-read** — never trusted because of its filename. Source: the
-[google/fonts](https://github.com/google/fonts) repo, so these are the real
-bytes, not a third-party mirror.
-
-| Family | Devanagari | GSUB | GPOS | Verdict |
-|---|---|---|---|---|
-| Noto Sans Devanagari | **128/128** | yes | yes | UNICODE-OK |
-| Noto Serif Devanagari | **128/128** | yes | yes | UNICODE-OK |
-| Yantramanav | **128/128** | yes | yes | UNICODE-OK |
-| Tiro Devanagari Hindi | **128/128** | yes | yes | UNICODE-OK |
-| Mukta | 127/128 | yes | yes | UNICODE-OK |
-| Martel | 122/128 | yes | yes | UNICODE-OK |
-| Halant | 102/128 | yes | yes | UNICODE-OK |
-| Hind | 94/128 | yes | yes | UNICODE-OK |
-| Kalam (handwriting) | 94/128 | yes | yes | UNICODE-OK |
-
-All SIL Open Font License 1.1 — free for commercial and broadcast use, which
-matters because these videos go out with the band.
-
-**Using one:** install it system-wide, then
+A slug names a directory in the font repo. It resolves the `.ttf` *and* its
+generated layout, which is the whole point — a `.ttf` without its layout silently
+falls back to the Preeti-era map and renders that font's words wrong.
 
 ```bash
-node render.mjs <audio> <lrc> --font "Mukta"
+node render.mjs song.mp3 song.lrc --font-slug ams-manthan
 ```
 
-No transcoding step. The `.lrc` stays Unicode and stays valid for AbleSet —
-that is the main advantage over Track B.
-
-**Not verified:** Anek Devanagari — the download timed out during the survey,
-not a defect in the font. Re-run `scripts/font_survey.py` on it before
-trusting it.
-
----
-
-## Track B — the `01 Fonts` collection
-
-Surveyed `D:\DB Project\...\Final\01 Fonts` (15 unique TTFs).
-
-**Every one of them: 0 Devanagari codepoints, 91–95 ASCII, no GSUB, no GPOS.**
-`Abhinav`, `Ananda Fanko 2`, `PawanG`, `Sapana`, `AMS Aakash`, `AMS Aakul 4`,
-`AMS Aakul 5`, `AMS BadHand`, `AMS Calligraphy 9`, `AMS Chandrakant`,
-`AMS Chhatrapati`, `AMS Dipanshu`, `AMS Handwriting 3`, `AMS Manoja`,
-`AMS Manthan`.
-
-They are usable, but only through Track B — which is the path that produced
-the Allare render:
+The repo is looked for as a sibling directory named `nepali-legacy-fonts`, or
+given explicitly:
 
 ```bash
-node render.mjs <audio> <lrc> --legacy-font Abhinav.TTF
+node render.mjs song.mp3 song.lrc --font-slug ams-manthan --fonts-repo C:\tools\nepali-legacy-fonts
 ```
 
-`render.mjs` then transcodes the lyrics via `scripts/lrc_legacy.py`
-(`--layout Preeti`), copies the `.ttf` into `public/fonts/`, and
-`LyricOverlay.jsx` registers it through the FontFace API with `delayRender`.
-A bare CSS `font-family` is **not** enough for these: Chromium sandbox
-profiles will not reliably resolve them by name, which is what made
-`--font "AMS Manthan"` look broken when the real fault was upstream.
+Both the layout and the font file must exist. A missing layout is a hard error
+rather than a fallback, and the message says which of the two is absent.
 
-### ⚠️ Track B is not the default, and for most lyrics it does not work
+**Why layouts are no longer vendored here.** They used to be, and the copy went
+stale in exactly the way you would expect: it still carried the pre-fix i-matra
+encoding, so `ि` produced a stray KA and `रिसले` rendered as `किस्तो`. A
+vendored layout is a copy that can be out of date with no warning, so there is
+now exactly one. If you see that failure anywhere, the layout is old — not the
+renderer.
 
-**Try Track A first.** If no specific classic typeface is required, a Unicode
-font removes every failure mode on this page at once — no transcoding, no
-layout file, no Python, and no possibility of a character rendering in the
-wrong typeface. `Nirmala UI` ships with Windows 11:
+## Before you render a legacy font: check the song
+
+A legacy font that passes every check may still be unable to write your song.
+AMS Manthan is verified end to end and cannot write Allare: 15 of 35 lines
+contain a character aNepali publishes no key for, so they are dropped or fall
+back to another typeface mid-word, silently.
 
 ```bash
-node render.mjs <audio> <lrc> --font "Nirmala UI"
+py ..\nepali-legacy-fonts\scripts\check_song.py --font ams-manthan song.lrc
 ```
 
-Track B exists only for when you need a *specific* look no Unicode font
-provides. Read the rest of this section before choosing it.
+Exit 1 means do not render this song in this font. The font repo's
+[docs/SONG-CHECK.md](https://github.com/mhzsajan/nepali-legacy-fonts/blob/main/docs/SONG-CHECK.md)
+explains why nothing downstream catches it — a wrong letter is not a malformed
+file, so the render exits 0, is the right length, has a clean background and
+passes every output check there is.
 
-### Preeti is not a safe default for these fonts either
+## The flag that looks ignored
 
-The command above works **because Abhinav happens to be a Preeti font.** Most
-of the folder is not. Feeding Preeti keys to `ams.manthan.ttf` renders exactly
-what Track B is supposed to prevent: glyphs collapsed onto each other and a
-literal `==` where the danda should be. AMS Manthan is a Kantipur-style
-layout — `k` / `Ka` / `ga`, nothing like Preeti's `s` / `v` / `u`.
+`--font` takes a *family name*, and a name that does not resolve does not error.
+The CSS family simply does not match, the browser falls through to the system
+font, and the output looks like you passed nothing. This is why:
 
-### What actually goes wrong, measured
+- `--font-file` reads the family out of the file rather than trusting `--font`
+- `--font-slug` does the same
+- pass `--font` with `--font-file` only to *override*
 
-Two real songs, 110 distinct lyric words, `ams.manthan`:
+Real disagreement seen in this project's own fonts: `Yantramanav` in the file vs
+`Yantra Manav` in a README, `Halant` vs `Halant New`.
 
-**1. Three characters have no key, and they reach the font anyway.**
-`्` virama (21 words), `ँ` candrabindu (12), `ञ` (1) — **34 words affected**.
-aNepali publishes those slots as Devanagari, not as a key, so there is
-nothing to read. The character is passed through, the font has no glyph, and
-Chromium substitutes a different font for it. One word, two typefaces.
+## Calibrating a new font
 
-This is why the failure looks like a typo rather than a bug: the passed-through
-character is not a key in that font at all, so what appears is whatever the
-*fallback* has for it — frequently reading as a stray `0` or `O` inside an
-otherwise correct word.
-
-Check before rendering anything:
+The renderer measures text width from the browser rather than from fontTools,
+because shaping is the browser's job. If a new face wraps or clips, calibrate it:
 
 ```bash
-py scripts/passthrough.py layouts/ams-manthan.json "song.lrc"
+node scripts/calibrate_width.mjs --font "<Family>" --font-file <ttf> --audio song.mp3 --lrc song.lrc --force
 ```
 
-**2. Preeti does not save you either.** Abhinav works because `npttf2utf`
-supplies the virama key. That is a property of the *layout*, not of the
-renderer's ability — a generated layout has no virama and no way to derive
-one, so switching from one custom font to another does not fix it. Only the
-Preeti family is covered.
+`--font-file` is required, or it silently measures the system font instead.
+Check that the printed coefficients differ from the last font you calibrated.
 
-**3. A generated layout can encode the wrong word silently.** The matra
-carrier has to come off both the Devanagari side and the key side. Miss the
-key side and `ि` becomes `ik` — two keys — and the encoder writes a stray KA:
-`रिसले` renders as `किस्तो`. Valid Devanagari, wrong word, no error.
+## The two bugs that made the legacy path unusable
+
+Neither was about fonts; both blocked everything before a font could be tried.
+Both are fixed, and both are recorded here because the failure messages pointed
+nowhere near the cause.
+
+**`npttf2utf` was never a dependency.** `scripts/layout_encoder.py` reads its
+five built-in layouts from the package's `map.json`. With the package absent,
+every `--legacy-font` render died with `FileNotFoundError: ...\scripts\map.json`
+— a message that says nothing about installing a Python package.
 
 ```bash
-py scripts/diag_encode.py layouts/ams-manthan.json --lrc "song.lrc"
+pip install fonttools npttf2utf pillow
 ```
 
-**4. Read the render log.** `!! not round-trip exact: 'x' -> 'keys'` means
-that word is wrong. It fires on nearly every word of an AMS Manthan run and
-reads as noise. A clean run prints only `OK ... lines encoded`.
+**Every preview render crashed.** `render.mjs` passed
+`--frames=0-<lastCue + 2s>`, computed from a different number than the
+composition's own duration, which `calculateMetadata` derives from
+`max(audio length, last cue)`. Whenever a song's audio is shorter than its last
+cue plus two seconds the range ran past the end:
 
-Full write-up with measurements:
-[nepali-legacy-fonts/docs/LEGACY-PITFALLS.md](https://github.com/mhzsajan/nepali-legacy-fonts/blob/main/docs/LEGACY-PITFALLS.md).
-
-### Generating a layout for the rest
-
-[anepali.com](https://www.anepali.com) publishes a character table per font —
-each cell is a key, drawn in that font, under a Devanagari category heading —
-so a font's layout can be **read** rather than guessed. The tooling lives in
-[mhzsajan/nepali-legacy-fonts](https://github.com/mhzsajan/nepali-legacy-fonts)
-and is vendored into `scripts/`:
-
-```bash
-# 1. generate the font's own layout, validated against the real .ttf
-py scripts/anepali_charmap.py ams-manthan --font "path/to/ams.manthan.ttf" --out layouts/ams-manthan.json
-
-# 2. render with it
-node render.mjs <audio> <lrc> --legacy-font ams.manthan.ttf --layout-file layouts/ams-manthan.json
+```
+Error: The "durationInFrames" of the <Composition /> was evaluated to be
+6257, but frame range 0-6259 is not within the frame range of the
+composition (0-6256).
 ```
 
-The slot order is calibrated off the Preeti page, where `npttf2utf` is ground
-truth, and the calibration is **asserted** (13/13 vowels, 36/36 consonants,
-10/10 numbers, 13/13 matras, all distinct) so a change to the site fails
-loudly instead of producing a plausible but wrong map.
+Allare is exactly that case — 417.0 s of audio against a 415.3 s last cue. The
+cap now lives in `calculateMetadata`, so one place owns the length and the two
+cannot drift apart again.
 
-**Verified: AMS Manthan** now renders correctly. Verify any new font with one
-frame before shipping — `--prepare-only` then `remotion still` takes seconds
-rather than a full render:
+## Looking at one frame first
+
+Step 3 of any legacy-font workflow is the one that catches a wrong font, and it
+costs seconds. A wrong map does not error — it renders the wrong letters, which
+is the failure that is easy to miss in a four-minute video.
 
 ```bash
-node render.mjs <audio> <lrc> --legacy-font <f>.ttf --layout-file layouts/<f>.json --prepare-only
+node render.mjs song.mp3 song.lrc --font-slug ams-manthan --prepare-only
 npx remotion still src/index.js LyricOverlay out/check.png --frame=5900 --props=out/props.json
 ```
 
-Notes:
-
-- **`Abhinav` is the proven one** — 35/35 lines round-tripped through
-  `npttf2utf`, rendered and eyeballed at 1080p. `ams.manthan` is the second,
-  via a generated map.
-- **`npttf2utf` must be installed.** `layout_encoder.py` loads its five
-  layouts from the package's `map.json`; without it `--legacy-font` dies with
-  a bare `FileNotFoundError` on that path.
-- `npttf2utf`'s Preeti map has no key for `फ`; `lrc_legacy.py` patches it with
-  `km` (`KEY_FIXES`). Loud `!! not round-trip exact` on stderr means a word
-  needs a manual fix — do not ship it silently.
-- **Symbols are deliberately not mapped.** aNepali publishes them, but the
-  same slots hold different characters on different pages, and a legacy font
-  already keeps its Devanagari punctuation on the ASCII codepoints, so
-  punctuation passes through the transcoder untouched. Mapping it twice is
-  what produced the literal `==`.
-
----
-
-## Why not just convert the fonts?
-
-Rebuilding one means writing a Unicode cmap **and** authoring GSUB/GPOS
-ligatures, with no ground truth to check the result against — and a visual
-transcription of a legacy key map was already shown to be unreliable
-(द/ध, श/ष confusion). Converting the *text* back into the encoding the font
-already speaks needs neither, and that is why Track B works today.
-
-For a new project, prefer Track A: a real Unicode font needs none of this.
+`--prepare-only` transcodes and registers the font without rendering.

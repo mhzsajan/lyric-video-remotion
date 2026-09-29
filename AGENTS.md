@@ -28,7 +28,7 @@ Run everything from the repo root on Windows. Source media lives in
 | Any render | Node 16+ (tested on 24.18) | `Intl.Segmenter` needs 16+; there is a fallback, but don't rely on it |
 | **`--legacy-font`, i.e. every real render** | **Python 3 on PATH** | `render.mjs` transcodes via `scripts/lrc_legacy.py`. It probes `python`, then `py`, then `python3`, and if none work it stops with an explanation instead of crashing |
 | The measurement/verification scripts | `ffmpeg` + `ffprobe` on PATH, `pillow`, `fonttools` | Not needed to *render* — Remotion bundles its own ffmpeg |
-| Font survey | `fonttools` | `python scripts/font_survey.py <folder>` |
+| Font survey | `fonttools` | Lives in the **font repo** now: `py ../nepali-legacy-fonts/scripts/font_survey.py <folder>` |
 
 Verified working: Node v24.18.0, Python 3.14.6, fontTools 4.65.0, Pillow 12.3.0.
 
@@ -139,7 +139,7 @@ src/parse-lrc.mjs     LRC -> cues {time, end, text}. Handles [mm:ss.xx]
 | Script | What it proves |
 |---|---|
 | `scripts/lrc_legacy.py` | Unicode → Preeti key transcoding for `--legacy-font` |
-| `scripts/font_survey.py <folder>` | which fonts actually have Devanagari + GSUB/GPOS |
+| `../nepali-legacy-fonts/scripts/font_survey.py <folder>` | which fonts actually have Devanagari + GSUB/GPOS (font repo) |
 | `scripts/reference_survey.py <a> [b]` | encode recipe, background purity, roam extent, line heights, glow curve |
 | `scripts/check_word_timing.mjs [lrc]` | word ordering, bounds, reassembly, beat-anchor clamping |
 | `scripts/check_letters.mjs [lrc]` | grapheme cases (`क्ष`, `नि`), lossless round-trip, size clamp |

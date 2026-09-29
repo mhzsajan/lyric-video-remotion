@@ -10,6 +10,9 @@
  *   --preview           fast, small, no alpha -- for checking timing only
  *   --no-audio          text-only overlay: no audio track in the output
  *   --font <family>     font family to render with (must be installed)
+ *   --font-file <ttf>   render with a local .ttf, no transcoding at all
+ *   --font-slug <slug>  use a font + its generated layout from the font repo
+ *   --fonts-repo <dir>  where that repo is (default: ../nepali-legacy-fonts)
  *   --style <name>      pin every line to one animation instead of mixing
  *   --position <pos>    top | center | bottom        (default center)
  *   --size <px>         font size                    (default 104)
@@ -81,6 +84,18 @@ const LEGACY_FONT = flag("--legacy-font");
 const FONT_FILE_ARG = flag("--font-file");
 const BATCH = flag("--batch");
 
+// --font-slug ams-manthan: look a font up in the sibling font repo and use it.
+// The layouts used to be vendored here, which meant two copies of every map and
+// no way to tell which was current. The vendored copy went stale in exactly the
+// way you would expect -- it still carried the pre-fix i-matra encoding, so ि
+// produced a stray KA and रिसले rendered as किस्तो. Reading from the font repo
+// makes that class of bug impossible rather than merely fixed.
+//
+// Point somewhere else with --fonts-repo, or place the repo as a sibling
+// directory named nepali-legacy-fonts.
+const FONT_SLUG = flag("--font-slug");
+const FONTS_REPO = flag("--fonts-repo") || guessFontsRepo();
+
 // These are opposite operations, so asking for both is a mistake worth naming
 // rather than a precedence question. Checked at the top of run(), before
 // either font is resolved: the legacy path fails first on a bad file and would
@@ -98,7 +113,7 @@ function refuseBothFonts() {
 
 // Which key layout the legacy font speaks. npttf2utf knows five; a font
 // outside those needs a map generated from the publisher's character table
-// (scripts/anepali_charmap.py) and passed here with --layout-file. Preeti is
+// in the font repo, and passed here with --layout-file. Preeti is
 // NOT a safe default for an arbitrary Nepali font: feeding Preeti keys to
 // AMS Manthan renders collapsed glyphs and literal `==` instead of the danda.
 const LEGACY_LAYOUT = flag("--layout") || "Preeti";
@@ -286,6 +301,95 @@ function resolveLegacyFont(fileOrPath, lrcPath) {
  *   --no-audio render has to carry one.
  */
 /**
+ * Find the sibling font repo, which is where layouts and .ttf files live now.
+ *
+ * Tries the parent of this repo first (the usual side-by-side clone), then a
+ * couple of conventional spots under the user's home. Returns a path that may
+ * not exist -- the caller reports it with the full path, which is more use than
+ * a bare null.
+ */
+function guessFontsRepo() {
+  const here = path.dirname(path.resolve(process.argv[1] || "."));
+  const candidates = [
+    path.resolve(here, "..", "nepali-legacy-fonts"),
+    path.resolve(here, "nepali-legacy-fonts"),
+  ];
+  // tools/ is where these repos live on this machine, but do not hardcode a
+  // home directory: fall back to the clone the user most likely has.
+  const home = process.env.USERPROFILE || process.env.HOME || "";
+  if (home) {
+    candidates.push(path.join(home, "tools", "nepali-legacy-fonts"));
+    candidates.push(path.join(home, "nepali-legacy-fonts"));
+  }
+  for (const c of candidates) {
+    if (fs.existsSync(path.join(c, "layouts"))) return c;
+  }
+  return candidates[0];
+}
+
+/**
+ * Resolve --font-slug to a .ttf plus its generated layout, from the font repo.
+ *
+ * The slug names a directory in the font repo's fonts/ tree. Its layout is
+ * layouts/<slug>.json. Both must exist: a .ttf with no layout means falling
+ * back to Preeti, which renders that font's words wrong rather than erroring,
+ * so a missing layout is treated as a hard failure.
+ *
+ * Returns null and prints why, or the object {ttf, layout, family}.
+ */
+function resolveFontSlug(slug) {
+  const root = FONTS_REPO;
+  const layout = path.join(root, "layouts", slug + ".json");
+  const fontsDir = path.join(root, "fonts", slug);
+
+  console.log("\n-- font slug " + slug + " " + "-".repeat(Math.max(0, 40 - slug.length)));
+  if (!fs.existsSync(path.join(root, "layouts"))) {
+    console.error("  No font repo at " + root);
+    console.error("  Expected a layouts/ directory there. Clone it, or point at it:");
+    console.error("      git clone https://github.com/mhzsajan/nepali-legacy-fonts");
+    console.error("      node render.mjs ... --font-slug " + slug + " --fonts-repo <path>");
+    process.exitCode = 1;
+    return null;
+  }
+  if (!fs.existsSync(layout)) {
+    console.error("  No layout for '" + slug + "' in the font repo.");
+    console.error("  Looked for: " + layout);
+    console.error("  The font repo ships 79 generated layouts; list them with:");
+    console.error("      dir layouts\\*.json");
+    console.error("  Or check the font can write your song at all before rendering:");
+    console.error("      py ..\\nepali-legacy-fonts\\scripts\\check_song.py --font " + slug + " song.lrc");
+    process.exitCode = 1;
+    return null;
+  }
+  if (!fs.existsSync(fontsDir)) {
+    console.error("  Layout '" + slug + "' exists, but no font files at:");
+    console.error("      " + fontsDir);
+    console.error("  Fetch the fonts first:  py scripts\\fetch_fonts.py");
+    process.exitCode = 1;
+    return null;
+  }
+  const ttf = fs.readdirSync(fontsDir)
+    .filter((f) => /\.(ttf|otf)$/i.test(f))
+    .sort()[0];
+  if (!ttf) {
+    console.error("  No .ttf or .otf in " + fontsDir);
+    process.exitCode = 1;
+    return null;
+  }
+
+  const file = path.join(fontsDir, ttf);
+  // The family comes from the font file, not the slug: slugs are lowercase
+  // ("ams-manthan") and the family is not ("Ams Manthan"), and a name that does
+  // not resolve does not error -- the browser falls through to the system font
+  // and the render looks like the flag was ignored.
+  const family = flag("--font") || readFontFamily(file) || slug;
+  console.log("  font slug   : " + slug);
+  console.log("  font repo   : " + root);
+  console.log("  layout      : " + path.relative(root, layout));
+  return { ttf: file, layout, family };
+}
+
+/**
  * Read a .ttf's family name, so --font-file does not have to be told.
  *
  * The name is taken from the font rather than from --font because the two
@@ -380,6 +484,13 @@ async function run(audioPath, lrcPath) {
     refuseBothFonts();
     return;
   }
+
+  // --font-slug expands to a real --legacy-font plus a layout file, before
+  // anything else reads those two. Done here rather than at each use site so
+  // there is one place that knows the slug form exists.
+  const slug = FONT_SLUG ? resolveFontSlug(FONT_SLUG) : null;
+  if (FONT_SLUG && !slug) return;
+
   const title = path.basename(audioPath).replace(/\.[^.]+$/, "");
   rule(title);
 
@@ -389,9 +500,10 @@ async function run(audioPath, lrcPath) {
   // sequences so the classic font actually renders (see scripts/lrc_legacy.py).
   let legacy = null;
   let renderLrc = lrcText;
-  if (LEGACY_FONT) {
-    const family = flag("--font") || legacyFamilyGuess(LEGACY_FONT);
-    const fontPath = resolveLegacyFont(LEGACY_FONT, lrcPath);
+  if (slug || LEGACY_FONT) {
+    const fontArg = slug ? slug.ttf : LEGACY_FONT;
+    const family = flag("--font") || (slug ? slug.family : legacyFamilyGuess(LEGACY_FONT));
+    const fontPath = slug ? slug.ttf : resolveLegacyFont(LEGACY_FONT, lrcPath);
     const convOut = path.join(HERE, "out", "_legacy-" + path.basename(lrcPath));
     fs.mkdirSync(path.dirname(convOut), { recursive: true });
     console.log("  legacy font : " + path.basename(fontPath) + " (" + family + ")");
@@ -421,12 +533,17 @@ async function run(audioPath, lrcPath) {
       process.exit(1);
     }
 
+    // A slug carries its own layout. Falling back to the built-in --layout here
+    // would feed a Preeti-era map to a font that does not speak Preeti, which
+    // renders collapsed glyphs and a literal `==` where the danda should be.
+    const layoutFile = slug ? slug.layout : LEGACY_LAYOUT_FILE;
+
     try {
       execFileSync(py.cmd, [
         path.join(HERE, "scripts", "lrc_legacy.py"),
         lrcPath, convOut,
         "--layout", LEGACY_LAYOUT,
-        ...(LEGACY_LAYOUT_FILE ? ["--layout-file", LEGACY_LAYOUT_FILE] : []),
+        ...(layoutFile ? ["--layout-file", layoutFile] : []),
         "--font-family", family,
         "--font-file", path.basename(fontPath),
       ], { stdio: "inherit", cwd: HERE });

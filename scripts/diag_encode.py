@@ -39,8 +39,8 @@ This script prints the encoder's output beside the source, per word, so the
 failure is visible rather than inferred from a frame.
 
 Usage:
-    py scripts/diag_encode.py layouts/ams-manthan.json
-    py scripts/diag_encode.py layouts/ams-manthan.json --lrc "song.lrc"
+    py scripts/diag_encode.py ..\\nepali-legacy-fonts\\layouts\\ams-manthan.json
+    py scripts/diag_encode.py ..\\nepali-legacy-fonts\\layouts\\ams-manthan.json --lrc "song.lrc"
 """
 import json
 import os

@@ -39,7 +39,7 @@ the words it affects, plus the keys that DO exist for the same sound where
 that is knowable (nukta forms, for instance).
 
 Usage:
-    py scripts/passthrough.py layouts/ams-manthan.json "song.lrc"
+    py scripts/passthrough.py ..\\nepali-legacy-fonts\\layouts\\ams-manthan.json "song.lrc"
 """
 import json
 import os

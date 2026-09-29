@@ -78,7 +78,7 @@ def main():
     ap.add_argument("dst")
     ap.add_argument("--layout", default="Preeti")
     ap.add_argument("--layout-file", default=None,
-                    help="generated layout JSON (scripts/anepali_charmap.py) "
+                    help="generated layout JSON (from the font repo) "
                          "for a font outside npttf2utf's five")
     ap.add_argument("--font-family", default=None)
     ap.add_argument("--font-file", default=None)
