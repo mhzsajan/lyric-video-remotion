@@ -10,6 +10,19 @@ mixing them up is the failure that cost the most time.
 
 A font belongs to one track. Ask it three questions.
 
+## Why these fonts are like this (the history)
+
+They were built for **legacy Encoded-Nepali** workflows — Preeti and friends.
+You were never meant to type Devanagari: you typed ASCII, and the font's ASCII
+glyphs *were drawn as* Devanagari, laid out in byte order. The font and the
+encoding were a matched pair.
+
+Legacy Windows text stacks (GDI, font-linking, ANSI codepage tricks) render
+them happily. The modern web stack refuses by design: HarfBuzz shaping plus
+strict Unicode cmaps. That is the whole reason they "look fine in the old
+editor but do nothing in the browser" — and why the fix was to convert the
+**text** into the font's native encoding, not to convert the font.
+
 ## The three checks
 
 A font renders Devanagari in Chromium only if **all three** hold:
