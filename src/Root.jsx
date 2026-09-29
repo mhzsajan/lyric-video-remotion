@@ -76,6 +76,13 @@ export const RemotionRoot = () => {
         // behaviour), otherwise each word is scheduled across the cue and
         // animates as it arrives. "reveal" | "karaoke" | "pulse".
         wordAnim: "off",
+        // Title and band, read from the .lrc's [ti:] and [ar:]. They drive
+        // the opening and closing cards; --title-card / --title-card-outro
+        // turn them on.
+        title: parsed.title || "",
+        band: parsed.band || "",
+        titleCard: false,
+        titleCardOutro: false,
         // Per-letter layer, nested inside each word span. letterAnim is
         // fade|rise|pop|wipe; letterVar is per-letter SIZE, clamped to 0.12 in
         // src/letters.js because the shirorekha is continuous across a word.

@@ -394,6 +394,15 @@ async function run(audioPath, lrcPath) {
   // and a changed LYRIC_FPS was silently ignored on re-render.
   const fps = Number(flag("--fps")) || (PREVIEW ? 15 : FORMAT === "mov" ? 60 : 30);
   const props = { fps };
+  // Title cards. The window is derived from the song's own first/last lyric
+  // (src/opener.js), so these are on/off switches rather than numbers to keep
+  // in step with the timings by hand. The title and band come from the .lrc's
+  // [ti:] and [ar:] and are parsed inside the component.
+  if (has("--title-card")) props.titleCard = true;
+  if (has("--title-card-outro")) {
+    props.titleCard = true;
+    props.titleCardOutro = true;
+  }
   if (style) props.style = style;
   if (flag("--size")) props.fontSize = Number(flag("--size"));
   if (flag("--color")) props.color = flag("--color");
@@ -558,6 +567,8 @@ if (BATCH) {
       "    --ends <file>    end timings, default <song>.ends.txt beside the .lrc",
       "    --allow-stale-ends  render even if most ends cannot be applied",
       "    --check          preflight only: verify timings, then exit",
+      "    --title-card     show the song title + band at the start",
+      "    --title-card-outro  also repeat the title at the end",
       "    --style <name>   pin one animation: " + STYLES.join(", "),
       "    --position <pos> top | center | bottom",
       "    --size <px>      font size (default 104)",
@@ -567,6 +578,7 @@ if (BATCH) {
       "    --letter-anim <m>  off (default) | fade | rise | pop | wipe",
       "    --letter-var <n>   per-letter size, 0..0.03 (clamped hard: the",
       "                      shirorekha is continuous across a word)",
+      "    --title-card / --title-card-outro",
       "    --color <#hex>   text colour",
       "    --seed <text>    animation seed (default: title from the .lrc)",
       "    --batch <dir>    render every audio+.lrc pair in a folder",

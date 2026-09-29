@@ -3,6 +3,7 @@ import { AbsoluteFill, Audio, staticFile, useCurrentFrame, useVideoConfig, delay
 import { styleFor, jitterFor, positionFor, sizeFor } from "./animations.js";
 import { wordTimings } from "./word-timing.js";
 import { splitGraphemes, letterSizePct } from "./letters.js";
+import { TitleCard } from "./TitleCard.jsx";
 import { AUDIO_FILE, LEGACY_FONT_FILE, LEGACY_FONT_FAMILY } from "./lyrics.generated.js";
 
 // Legacy Preeti-era fonts (AMS/Ananda/Abhinav): load the actual .ttf through
@@ -326,7 +327,7 @@ export function cueStyle(style, p, q, j) {
   return s;
 }
 
-export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, position, background, mode, sizeMode, sizeVar, wordAnim, letterAnim, letterVar }) => {
+export const LyricOverlay = ({ cues, title, band, seed, style, fontSize, color, shadow, position, background, mode, sizeMode, sizeVar, wordAnim, letterAnim, letterVar, titleCard, titleCardOutro }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = frame / fps;
@@ -401,7 +402,24 @@ export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, posit
     ...align,
   };
 
-  if (idx < 0) return <AbsoluteFill style={frameStyle} />;
+  // The opening and closing cards. They sit UNDER the lyrics in the tree: the
+  // card never shares the screen with text, so z-order is a non-issue, and
+  // keeping it in one wrapper means both return paths below (roam and centre)
+  // get it without duplicating the call.
+  const opener = (titleCard || titleCardOutro) ? (
+    <TitleCard
+      t={t}
+      firstLyric={cues.length ? cues[0].time : NaN}
+      lastLyricEnd={cues.length ? cues[cues.length - 1].end : NaN}
+      title={title}
+      band={band}
+      color={color}
+      anyway={!!titleCard && titleCard !== "no"}
+      outro={!!titleCardOutro}
+    />
+  ) : null;
+
+  if (idx < 0) return <AbsoluteFill style={frameStyle}>{opener}</AbsoluteFill>;
 
   const cue = cues[idx];
   const since = t - cue.time;
@@ -463,6 +481,7 @@ export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, posit
         <div style={{ ...textStyle, fontSize: cur.size, ...layout(cue.index) }}>
           <div style={{ ...st, display: "inline-block" }}>{cur.content}</div>
         </div>
+        {opener}
       </AbsoluteFill>
     );
   }
@@ -489,6 +508,7 @@ export const LyricOverlay = ({ cues, seed, style, fontSize, color, shadow, posit
       ) : null}
 
       <div style={{ ...textStyle, fontSize: cur.size, ...st }}>{cur.content}</div>
+      {opener}
     </AbsoluteFill>
   );
 };
