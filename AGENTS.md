@@ -155,6 +155,44 @@ touching anything else in the renderer.
 song's cues (109/109 for Allare). It exists because a word popping out of order
 mid-render is painful to spot by eye in a four-minute video.
 
+## Per-letter animation and size
+
+```bash
+--letter-anim fade|rise|pop|wipe   # per-letter animation  (default off)
+--letter-var 0..0.03               # per-letter SIZE       (default 0 = off)
+```
+
+A second animated layer nested **inside** each word span, so it works with or
+without `--word-anim`. `--letter-anim` is safe at any strength; `--letter-var`
+is capped hard at **0.03**.
+
+**Letters are grapheme clusters, not codepoints** (`src/letters.js`,
+`Intl.Segmenter`). `क्ष` is three codepoints forming one glyph, and `नि` stores
+its pre-base matra *after* the consonant though it draws to the left. Splitting
+on codepoints mangles both. `node scripts/check_letters.mjs` covers the known
+cases plus a lossless round-trip over every cue in a song.
+
+**Why the size cap is so low — measured, not guessed.** Rendering one settled
+line at five values and reading the headline at 3× zoom:
+
+| `--letter-var` | What `हावा` looks like |
+|---|---|
+| `0` | one continuous bar (control) |
+| **`0.03`** | **bar continuous, letters differ subtly** — the cap |
+| `0.05` | bar starts to separate |
+| `0.08` | bar clearly broken into segments |
+| `0.12` | badly broken, the word reads as *damaged* |
+
+The first guess here was 0.12 and it was plainly wrong. The shirorekha is the
+strongest horizontal feature in a Devanagari glyph, so it is the first thing
+the eye catches when it steps, and 0.05 is already enough to look like a
+mistake. This is a property of the script — any typesetter that lets you size
+two letters of a Devanagari word differently breaks it the same way, which is
+why **size is per-word** and animation can safely be per-letter.
+
+> Gotcha #7 below says size is per WORD, never per letter. That is still true
+> for anything above 0.03; the letter layer only reaches that far.
+
 ## Gotchas that cost us time (do not rediscover these)
 
 1. **process.env in components is statically replaced at build time.** An

@@ -68,6 +68,8 @@ Ableton and the video can never disagree.
 | `--size-mode <m>` | Random size per `word` (default) or per `phrase`, or `off`. |
 | `--size-var <n>` | How far those sizes vary, `0`..`0.45` (default `0.15`). |
 | `--word-anim <m>` | `off` (default), `reveal`, `karaoke` or `pulse` — animate word by word. |
+| `--letter-anim <m>` | `off` (default), `fade`, `rise`, `pop`, `wipe` — animate letter by letter. |
+| `--letter-var <n>` | Per-letter size, `0`..`0.03` (default `0`, off). Capped low — see below. |
 | `--color <#hex>` | Text colour, default `#ffffff`. |
 | `--seed <text>` | Animation seed, default the `[ti:]` title. |
 | `--out <file>` | Explicit output path. |
@@ -89,6 +91,18 @@ times are derived at render time by dividing each cue's span among its words in
 proportion to character count, so the file AbleSet and Ableton read stays
 exactly as Song Timer wrote it. Modes: `reveal`, `karaoke`, `pulse`, or `off`
 for the default whole-line animation.
+
+**Per-letter animation, but a very small per-letter size.** `--letter-anim pop`
+adds a second layer inside each word. Letters are split on **grapheme clusters**
+(`Intl.Segmenter`), not characters, so `क्ष` stays one glyph and the pre-base
+matra in `नि` stays attached to the left of its consonant.
+
+`--letter-var` is capped at **0.03** and that cap is measured, not stylistic.
+Devanagari's headline bar (shirorekha) runs continuously across a word, so two
+letters at different sizes snap it in half. At 0.08 the bar visibly breaks into
+segments; at 0.12 the word looks damaged. Animation is safe at any strength —
+a letter can appear without changing size — which is why the two are separate
+flags. See the table in `AGENTS.md` for all five measured values.
 
 **Always preview first.** The one ProRes render measured end to end — Allare,
 417 s at 1080p60 — came out at **3.2 GB** and took minutes to encode, roughly
