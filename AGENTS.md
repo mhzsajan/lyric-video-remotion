@@ -351,6 +351,14 @@ a grey rectangle over the camera feed. `scripts/reference_survey.py` checks
    NOTHING: Chromium falls back per character. The working path is
    `--legacy-font <file>`, which transcodes the lyrics into the font's own key
    layout and registers the .ttf through FontFace.
+   **Do not generate a layout before looking: 79 are already made and verified**
+   in [nepali-legacy-fonts](https://github.com/mhzsajan/nepali-legacy-fonts)/`layouts/`
+   (214/214 fonts usable; 0 need a hand-written map). That repo also holds the
+   curated **42-font preferred list**, and its
+   [which fonts work without issue](https://github.com/mhzsajan/nepali-legacy-fonts#which-fonts-work-without-issue)
+   table is the answer to give when someone asks for a font that just works:
+   **Tier A — the 58 Unicode fonts — is the only tier where a character cannot
+   come out wrong.**
    **But prefer a Unicode font.** `--font "Nirmala UI"` has none of these
    problems and needs nothing installed. Track B is only for a specific
    classic look, and it does not work for most lyrics: measured on two songs,

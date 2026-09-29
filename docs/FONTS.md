@@ -170,6 +170,13 @@ carrier has to come off both the Devanagari side and the key side. Miss the
 key side and `ि` becomes `ik` — two keys — and the encoder writes a stray KA:
 `रिसले` renders as `किस्तो`. Valid Devanagari, wrong word, no error.
 
+> **Fixed.** `layouts/ams-manthan.json` in this repo was regenerated with the
+> suffix-stripping fix in `anepali_charmap.py`; `रिसले` encodes `irsalae`, not
+> the `ikrsalae` that produced `किस्तो`. The copy vendored here has since been
+> re-synced from `nepali-legacy-fonts`. If you regenerate a layout with an old
+> copy of the script, this bug comes straight back — diff the key set against
+> a known-good layout (69 keys, no Devanagari keys) before trusting it.
+
 ```bash
 py scripts/diag_encode.py layouts/ams-manthan.json --lrc "song.lrc"
 ```
@@ -181,9 +188,34 @@ reads as noise. A clean run prints only `OK ... lines encoded`.
 Full write-up with measurements:
 [nepali-legacy-fonts/docs/LEGACY-PITFALLS.md](https://github.com/mhzsajan/nepali-legacy-fonts/blob/main/docs/LEGACY-PITFALLS.md).
 
-### Generating a layout for the rest
+### Where the ready-made fonts are
 
-[anepali.com](https://www.anepali.com) publishes a character table per font —
+**This repo is the renderer; the catalogue lives in
+[nepali-legacy-fonts](https://github.com/mhzsajan/nepali-legacy-fonts).**
+Only `layouts/ams-manthan.json` is vendored here, as the worked example.
+Before generating anything, check whether it already exists:
+
+| | Count | State |
+|---|---:|---|
+| Fonts with a ready-made layout | **79** | all verified against their own `.ttf`, `79 passed, 0 failed` |
+| Fonts that speak Preeti | 77 | `--layout Preeti`, map ships inside `npttf2utf` |
+| Fonts needing no layout at all | 58 | Unicode, `--font "<family>"` |
+| Fonts needing a hand-written map | **0** | the `NOTABLE` class is empty |
+
+That is **214 of 214 usable.** The same repo carries a curated
+**42-font preferred list** with the exact command per font, and a tier table
+answering the only question that matters here —
+[which fonts work without issue](https://github.com/mhzsajan/nepali-legacy-fonts#which-fonts-work-without-issue):
+
+- **Tier A — 58 `UNICODE`:** nothing can go wrong. Answer from here when
+  someone asks for a font that just works.
+- **Tier B — 79 `GENERATED`** and **Tier C — 77 `PREETI`:** verified, but
+  carry the five characters below.
+
+### Generating a layout for a font that has none
+
+Only reach for this if the font is not among the 79. [anepali.com](https://www.anepali.com)
+publishes a character table per font —
 each cell is a key, drawn in that font, under a Devanagari category heading —
 so a font's layout can be **read** rather than guessed. The tooling lives in
 [mhzsajan/nepali-legacy-fonts](https://github.com/mhzsajan/nepali-legacy-fonts)
